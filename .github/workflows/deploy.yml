@@ -1,0 +1,19 @@
+name: Deploy to Quave Cloud
+
+on:
+  push:
+    branches: ['main']
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Quave Cloud
+        uses: zcloud-ws/zcloud-deploy-action@main
+        with:
+          env-token: ${{ secrets.QUAVE_CLOUD_ENV_TOKEN }}
+          env: filipenevola-furia-calendar-sync-production

@@ -1,0 +1,20 @@
+{
+  "name": "furia-calendar-sync",
+  "version": "1.0.0",
+  "description": "Sync FURIA CS matches to Google Calendar by scraping draft5.gg",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.js",
+    "sync": "bun run src/index.js"
+  },
+  "keywords": ["furia", "calendar", "cs", "counter-strike", "esports", "draft5"],
+  "author": "Filipe Névola",
+  "license": "MIT",
+  "dependencies": {
+    "@quave/logger": "^1.0.3",
+    "cheerio": "^1.1.2",
+    "googleapis": "^144.0.0",
+    "node-cron": "^3.0.3"
+  }
+}

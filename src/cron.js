@@ -10,17 +10,15 @@ import { sync } from './sync.js';
 import { logger } from './logger.js';
 
 /**
- * Starts the cron scheduler for daily sync
+ * Starts the cron scheduler for periodic sync
  * 
- * Default schedule: 2 AM UTC daily
- * Can be overridden with CRON_SCHEDULE env var (e.g., "0 2 * * *" for 2 AM UTC daily)
+ * Default schedule: every 30 minutes
+ * Can be overridden with CRON_SCHEDULE env var
  */
 export function startCronScheduler() {
-  // Default: 2 AM UTC
-  // Can be overridden with CRON_SCHEDULE env var
-  const cronSchedule = process.env.CRON_SCHEDULE || '0 2 * * *';
+  const cronSchedule = process.env.CRON_SCHEDULE || '*/30 * * * *';
 
-  logger.info(`📅 Scheduling daily sync with cron: ${cronSchedule}`);
+  logger.info(`📅 Scheduling sync with cron: ${cronSchedule}`);
 
   cron.schedule(cronSchedule, async () => {
     logger.info('⏰ Scheduled sync triggered');
@@ -35,5 +33,5 @@ export function startCronScheduler() {
     timezone: 'UTC'
   });
 
-  logger.info('✅ Daily sync scheduler started');
+  logger.info('✅ Sync scheduler started');
 }

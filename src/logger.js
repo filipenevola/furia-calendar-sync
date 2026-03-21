@@ -1,15 +1,19 @@
 import { createLogger } from '@quave/logger';
 
+const REPO = 'filipenevola/furia-calendar-sync';
+const BRANCH = process.env.GIT_BRANCH || 'main';
+const APP_ENV_ID = 'XfX3mdKCBKPEtzXAv';
+const CURSOR_TAG = `@Cursor repo=${REPO}, branch=${BRANCH}\nUse Quave ONE MCP to investigate: get-logs appEnvId=${APP_ENV_ID}, get-app-env-status appEnvId=${APP_ENV_ID}, get-app-env-pods appEnvId=${APP_ENV_ID}`;
+
 // Initialize logger with Slack error webhook
 const slackWebhookUrl = process.env.SLACK_ERROR_WEBHOOK;
 
 // Validate Slack webhook URL format
 function isValidSlackWebhook(url) {
   if (!url) return false;
-  // Slack webhooks typically start with https://hooks.slack.com/services/
   return typeof url === 'string' && 
          url.startsWith('https://hooks.slack.com/services/') &&
-         url.length > 40; // Basic length check
+         url.length > 40;
 }
 
 const isSlackEnabled = isValidSlackWebhook(slackWebhookUrl);
@@ -21,22 +25,32 @@ if (process.env.SLACK_ERROR_WEBHOOK && !isSlackEnabled) {
   console.warn('[LOGGER] SLACK_ERROR_WEBHOOK not set - Slack notifications disabled');
 }
 
-export const logger = createLogger({
+const baseLogger = createLogger({
   appName: 'furia-calendar-sync',
   environment: process.env.NODE_ENV || 'production',
   debug: {
     enabled: true,
-    filter: ['SYNC'], // Enable debug logs for SYNC-related messages
+    filter: ['SYNC'],
   },
   slack: {
     enabled: isSlackEnabled,
     webhookUrl: isSlackEnabled ? slackWebhookUrl : undefined,
     webhookUrls: isSlackEnabled ? {
-      error: slackWebhookUrl, // Override for errors specifically
+      error: slackWebhookUrl,
     } : undefined,
     skipInDevelopment: false,
   },
 });
+
+export const logger = {
+  ...baseLogger,
+  error(message, ...rest) {
+    baseLogger.error(`${message}\n\n${CURSOR_TAG}\n\nwhat is going on?`, ...rest);
+  },
+  errorBackground(message, ...rest) {
+    baseLogger.errorBackground(`${message}\n\n${CURSOR_TAG}\n\nwhat is going on?`, ...rest);
+  },
+};
 
 // Helper to ensure errors are always Error objects for proper Slack formatting
 export function ensureError(error) {

@@ -3,7 +3,7 @@ import { createLogger } from '@quave/logger';
 const REPO = 'filipenevola/furia-calendar-sync';
 const BRANCH = process.env.GIT_BRANCH || 'main';
 const APP_ENV_ID = 'XfX3mdKCBKPEtzXAv';
-const CURSOR_TAG = `@Cursor repo=${REPO}, branch=${BRANCH}\nUse Quave ONE MCP to investigate: get-logs appEnvId=${APP_ENV_ID}, get-app-env-status appEnvId=${APP_ENV_ID}, get-app-env-pods appEnvId=${APP_ENV_ID}`;
+const CURSOR_TAG = `<@U0A52LNRDK3> repo=${REPO}, branch=${BRANCH}\nUse Quave ONE MCP to investigate: get-logs appEnvId=${APP_ENV_ID}, get-app-env-status appEnvId=${APP_ENV_ID}, get-app-env-pods appEnvId=${APP_ENV_ID}`;
 
 // Initialize logger with Slack error webhook
 const slackWebhookUrl = process.env.SLACK_ERROR_WEBHOOK;

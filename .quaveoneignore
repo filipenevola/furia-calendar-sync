@@ -1,0 +1,15 @@
+.git
+.github
+.idea
+node_modules
+.env
+.env.*
+*.log
+credentials.json
+service-account.json
+token.json
+tests
+docs
+
+README.md
+quaveone.md

@@ -1,18 +1,15 @@
 /**
- * Standardized Match format
- * 
- * All retrieval logic must return matches in this format.
- * This allows swapping retrieval implementations without affecting calendar sync.
- * 
  * @typedef {Object} Match
- * @property {Date} date - Match date/time (JavaScript Date object, UTC)
- * @property {string} opponent - Opponent team name
- * @property {boolean} isHome - true if FURIA is listed as teamA (higher seed / "home" side)
- * @property {string} competition - Tournament/competition name (e.g., "PGL Cluj-Napoca 2026")
- * @property {string} location - Venue/location name
- * @property {string} broadcast - Stream/broadcast info (e.g., "Twitch: gaules") - optional
- * @property {string} format - Match format (e.g., "MD3", "MD5") - optional
- * @property {string} source - Source identifier for debugging (e.g., "draft5.gg")
+ * @property {string} matchId - Stable HLTV match ID (reschedules keep the same ID).
+ * @property {Date} date - UTC instant from HLTV data-unix milliseconds.
+ * @property {string} team - Canonical tracked team (FURIA, Legacy, paiN, MIBR).
+ * @property {number} teamId - HLTV team ID.
+ * @property {string} opponent
+ * @property {number} opponentId
+ * @property {string} competition
+ * @property {string} format - Empty unless confirmed; never infer BO3/BO5.
+ * @property {string} location - Empty unless confirmed.
+ * @property {string} source - hltv.org
+ * @property {string} url - HLTV match page for user reference.
  */
-
 export {};

@@ -1,125 +1,90 @@
-# FURIA Calendar Sync 🎮
+# Brazilian CS Calendar Sync
 
-Automatically sync FURIA CS matches to your Google Calendar.
+Finite Bun job that synchronizes **FURIA, Legacy, paiN and MIBR** matches from HLTV
+into the existing Google Calendar. The repository name is kept for compatibility.
 
-## Features
+## Source and time zones
 
-- 🌐 **Web Dashboard** - Simple UI to view sync status and trigger manual syncs
-- 📊 **Enhanced Logging** - Detailed logs with Slack error notifications
-- 🔄 **Daily Automatic Sync** - Runs automatically every day using in-app cron scheduling
-- 📅 Creates/updates Google Calendar events
-- 🎯 Shows match format (MD3, MD5)
-- 📺 Shows stream info when available
-- ⏰ 1-hour and 15-minute reminders
-- 🏆 Covers all tournaments (Majors, IEM, PGL, ESL, etc.)
+The authoritative source is each team's **Upcoming matches** section:
 
-## Data Source
+- [FURIA — 8297](https://www.hltv.org/team/8297/furia)
+- [Legacy — 12468](https://www.hltv.org/team/12468/legacy)
+- [paiN — 4773](https://www.hltv.org/team/4773/pain)
+- [MIBR — 9215](https://www.hltv.org/team/9215/mibr)
 
-The app fetches match data from [draft5.gg](https://draft5.gg/equipe/330-FURIA), a Brazilian CS esports coverage site. No API key required - data is extracted from server-rendered pages.
+`data-unix` is an absolute UTC timestamp in **milliseconds**. Never parse the
+visible localized date/time or add/subtract a fixed offset. Google receives ISO
+UTC instants with `CALENDAR_TIME_ZONE` (default `America/Campo_Grande`) for display.
+Example: `2026-09-09T06:00:00Z` is **02:00 in Campo Grande**, not 03:00.
+The calendar viewer may display the event in their own selected timezone.
 
-## Setup
+HLTV match-detail pages can be blocked independently of team pages. Production
+uses only the four team pages; **format, venue and streams are omitted when not
+confirmed**, rather than guessed. Event duration is an estimated two hours, not
+a guaranteed finish time. Each event links to its HLTV match page and has 60/15
+minute popup reminders. The detail parser remains for fixture cross-check tests,
+not as a production dependency.
 
-### 1. Google Calendar Service Account
+## Safety and identity
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project (or use existing)
-3. Enable the **Google Calendar API**
-4. Go to **IAM & Admin > Service Accounts**
-5. Create a service account
-6. Create a JSON key and download it
-7. Base64 encode the JSON: `base64 -i service-account.json`
-8. Add as GitHub secret: `GOOGLE_CREDENTIALS`
+- All four team pages must load and validate before any calendar write.
+- HTTP 403/429, challenge HTML, malformed timestamps, missing sections and
+  conflicting data fail the run; they are not successful empty schedules.
+- An explicit "No upcoming matches" section is a valid empty result.
+- Only future matches are synchronized; live and completed matches are omitted.
+- `hltv_<matchId>` identifies an event across rescheduling. A derby appears once,
+  while two matches between the same teams in one event remain separate.
+- Deterministic Google event IDs make retries idempotent, including an uncertain
+  insert. Pagination is followed; unrelated calendar events are never modified.
+- Existing Draft5 FURIA events are adopted **in place** only when opponent and
+  start time (within six hours) uniquely identify them. Ambiguity aborts the plan
+  before writes. A repeat sync cannot create a second copy of a migrated event.
+- No automatic event deletion: disappearance from an upcoming list is not proof
+  of cancellation. Existing entries for disappeared/cancelled matches need review.
+- API write errors exit nonzero. Partial writes can safely be rerun by stable ID.
+- No web server, in-process cron, persistent storage or public host is needed.
 
-### 2. Share Calendar with Service Account
+## Run and test
 
-1. Open Google Calendar
-2. Go to calendar settings
-3. Under "Share with specific people", add the service account email
-4. Give it "Make changes to events" permission
-5. Copy the calendar ID (for your primary calendar, use your email)
-6. Add as GitHub secret: `GOOGLE_CALENDAR_ID`
-
-### 3. Quave Cloud Deployment
-
-The app is configured to deploy automatically to Quave Cloud via GitHub Actions.
-
-1. Add your Quave Cloud environment token as a GitHub secret:
-   - Go to your repository **Settings** > **Secrets and variables** > **Actions**
-   - Click **New repository secret**
-   - Name: `QUAVE_CLOUD_ENV_TOKEN`
-   - Value: Your environment token (get it from [Quave Cloud](https://app.quave.cloud))
-2. The GitHub Actions workflow will automatically deploy when you push to `main`
-3. App environment: `filipenevola-furia-calendar-sync-production`
-
-### GitHub Secrets Required
-
-| Secret | Description |
-|--------|-------------|
-| `GOOGLE_CREDENTIALS` | Base64 encoded service account JSON |
-| `GOOGLE_CALENDAR_ID` | Google Calendar ID (or `primary`) |
-| `SLACK_ERROR_WEBHOOK` | Slack webhook URL for error notifications (optional) |
-| `CRON_SCHEDULE` | Cron schedule for daily sync (default: `"0 2 * * *"` = 2 AM UTC daily) |
-| `QUAVE_CLOUD_ENV_TOKEN` | Quave Cloud environment token (required for deployment) |
-
-## How It Works
-
-1. The app runs on Quave Cloud and syncs FURIA CS matches to your Google Calendar
-2. **Automatic Daily Sync**: Runs every day at 2 AM UTC (configurable via `CRON_SCHEDULE` env var)
-3. Fetches upcoming FURIA matches from draft5.gg
-4. Creates/updates events in your Google Calendar
-5. Each event includes:
-   - Match title with opponent and format
-   - Tournament/competition name
-   - Venue information (LAN or Online)
-   - Stream info when available
-   - Automatic reminders
-
-### Deployment
-
-- **Automatic**: Pushing to `main` branch triggers deployment via GitHub Actions
-- **Manual**: Use the "Run workflow" button in the GitHub Actions tab
-
-## Web Dashboard
-
-Once deployed, the app includes a web dashboard accessible at your app's URL:
-
-- **View Status**: See the latest sync run details
-- **Trigger Sync**: Click the button to manually trigger a new sync
-- **Auto-refresh**: Status updates every 10 seconds
-
-The dashboard is available at the root URL of your deployed app (e.g., `https://furia.filipenevola.com/`).
-
-## Local Development
-
-This project uses [Bun](https://bun.sh) for fast JavaScript runtime and package management.
-
-```bash
-# Install Bun (if not already installed)
-curl -fsSL https://bun.sh/install | bash
-
-# Install dependencies
-bun install
-
-# Set environment variables
-export GOOGLE_CREDENTIALS="base64-encoded-credentials"
-export GOOGLE_CALENDAR_ID="your-calendar-id"
-export SLACK_ERROR_WEBHOOK="https://hooks.slack.com/services/..."  # Optional
-export CRON_SCHEDULE="0 2 * * *"  # Optional (default: 2 AM UTC daily)
-
-# Start the web server (includes dashboard)
-bun run start
-
-# The server will be available at http://localhost:3000
-# API endpoints:
-# - GET /api/status - Get latest sync status
-# - POST /api/sync - Trigger a new sync
-# - GET /health - Health check endpoint
+```sh
+bun install --frozen-lockfile
+bun test
+bun run sync --dry-run                 # live HLTV, no Calendar access
+bun run sync --dry-run --check-calendar # read real Calendar and preview actions
+bun run test:live --check-calendar      # 3 read-only rounds, 30 seconds apart
+bun run sync                           # writes unless DRY_RUN=true
 ```
 
-## License
+Credentials are needed only for calendar access. `GOOGLE_CREDENTIALS` accepts a
+Google service-account JSON object or its base64 encoding. Share the existing
+calendar with that service account with edit access. `GOOGLE_CALENDAR_ID` accepts
+its raw ID or base64-encoded ID. Do not commit credentials. Optional
+`SLACK_ERROR_WEBHOOK` preserves failure notifications. `DRY_RUN=true` is an
+additional environment-level write guard; `--dry-run` always prevents writes.
+`VALIDATION_ROUNDS` and `VALIDATION_INTERVAL_MS` tune the read-only live script.
 
-MIT
+## Quave ONE
 
----
+See [quaveone.md](quaveone.md) for exact IDs and [validation evidence](docs/hltv-validation.md).
 
-🎮 GO FURIA! 🎮
+The new entity is a **Job** (`dockerPreset: JOB`), not an always-on App. Its command
+runs once and exits. Set `maxConcurrency: 1`, `backoffLimit: 0`, timeout 600s. A
+recurring schedule lives on the **environment**, separate from `jobConfig`:
+
+- Cron: `*/30 * * * *` (same cadence as the old service).
+- Timezone: `America/Campo_Grande`.
+- Job settings require Apply changes; schedule updates take effect immediately.
+- Successful build state is `JOB_READY`; a successful execution is `SUCCEEDED`.
+
+Before cutover: deploy with `DRY_RUN=true`, keep schedule disabled, and require
+several successful read-only runs **from us-5**, not just from the Mac. Then stop
+(the old environment is never deleted), enable real writes, verify the first
+write and an idempotent repeat, and finally enable recurring runs. Preserve the
+old v5 deployment and its variables for rollback.
+
+Rollback: disable the new schedule first, wait/cancel any active run, restore
+`DRY_RUN=true`, then start the old environment's preserved v5. Do not deploy this
+new finite-job code into the old web App. Old source is commit `8c7dbe5`.
+
+Docs read via MCP: [App Types](https://docs.quave.cloud/deploy/app-types),
+[Jobs](https://docs.quave.cloud/deploy/jobs).

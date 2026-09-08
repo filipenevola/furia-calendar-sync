@@ -1,20 +1,29 @@
 {
   "name": "furia-calendar-sync",
   "version": "1.0.0",
-  "description": "Sync FURIA CS matches to Google Calendar by scraping draft5.gg",
+  "description": "Sync FURIA, Legacy, paiN and MIBR HLTV matches to Google Calendar",
   "main": "src/index.js",
   "type": "module",
   "scripts": {
-    "start": "bun run src/index.js",
-    "sync": "bun run src/index.js"
+    "start": "bun run src/job.js",
+    "sync": "bun run src/job.js",
+    "test": "bun test",
+    "test:live": "bun run scripts/validate-live.js"
   },
-  "keywords": ["furia", "calendar", "cs", "counter-strike", "esports", "draft5"],
-  "author": "Filipe Névola",
+  "keywords": [
+    "furia",
+    "legacy",
+    "pain",
+    "mibr",
+    "calendar",
+    "hltv",
+    "cs"
+  ],
+  "author": "Filipe N\u00e9vola",
   "license": "MIT",
   "dependencies": {
     "@quave/logger": "^1.0.3",
     "cheerio": "^1.1.2",
-    "googleapis": "^144.0.0",
-    "node-cron": "^3.0.3"
+    "googleapis": "^144.0.0"
   }
 }

@@ -2,7 +2,7 @@ import { createLogger } from '@quave/logger';
 
 const REPO = 'filipenevola/furia-calendar-sync';
 const BRANCH = process.env.GIT_BRANCH || 'main';
-const APP_ENV_ID = 'XfX3mdKCBKPEtzXAv';
+const APP_ENV_ID = process.env.QUAVE_APP_ENV_ID || 'rt4rMyvTuqNBZiZLX';
 const CURSOR_TAG = `<@U0A52LNRDK3> repo=${REPO}, branch=${BRANCH}\nUse Quave ONE MCP to investigate: get-logs appEnvId=${APP_ENV_ID}, get-app-env-status appEnvId=${APP_ENV_ID}, get-app-env-pods appEnvId=${APP_ENV_ID}`;
 
 // Initialize logger with Slack error webhook
@@ -26,7 +26,7 @@ if (process.env.SLACK_ERROR_WEBHOOK && !isSlackEnabled) {
 }
 
 const baseLogger = createLogger({
-  appName: 'furia-calendar-sync',
+  appName: 'br-cs-calendar-sync',
   environment: process.env.NODE_ENV || 'production',
   debug: {
     enabled: true,

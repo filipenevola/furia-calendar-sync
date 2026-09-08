@@ -1,18 +1,7 @@
-FROM oven/bun:latest
-
+FROM oven/bun:1.3.2
 WORKDIR /app
-
-# Copy package files
-COPY package.json bun.lock* ./
-
-# Install dependencies
+COPY package.json bun.lock ./
 RUN bun install --production --frozen-lockfile
-
-# Copy source code
 COPY src/ ./src/
-
-# Expose port
-EXPOSE 3000
-
-# Run the server
-CMD ["bun", "run", "src/index.js"]
+COPY scripts/ ./scripts/
+CMD ["bun", "run", "src/job.js"]

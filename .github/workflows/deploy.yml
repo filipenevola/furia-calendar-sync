@@ -1,19 +1,49 @@
-name: Deploy to Quave Cloud
+name: Test and deploy HLTV Job
 
 on:
+  pull_request:
   push:
     branches: ['main']
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: hltv-job-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  deploy:
+  test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Deploy to Quave Cloud
-        uses: zcloud-ws/zcloud-deploy-action@main
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          env-token: ${{ secrets.QUAVE_CLOUD_ENV_TOKEN }}
-          env: filipenevola-furia-calendar-sync-production
+          bun-version: 1.3.2
+      - run: bun install --frozen-lockfile
+      - run: bun test
+        env:
+          TZ: UTC
+      - run: bun test
+        env:
+          TZ: Pacific/Auckland
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Quave ONE CLI
+        run: |
+          cd /tmp
+          curl -fsSLO --retry 3 https://github.com/quaveone/cli/releases/download/v1.0.49/quaveone-1.0.49-linux-amd64
+          curl -fsSLO --retry 3 https://github.com/quaveone/cli/releases/download/v1.0.49/quaveone_1.0.49_checksums.txt
+          grep " quaveone-1.0.49-linux-amd64$" quaveone_1.0.49_checksums.txt | sha256sum --check --strict
+          mv quaveone-1.0.49-linux-amd64 quaveone
+          chmod +x quaveone
+      - name: Deploy only the new Job and wait for JOB_READY
+        env:
+          QUAVEONE_ENV_TOKEN: ${{ secrets.QUAVE_HLTV_JOB_ENV_TOKEN }}
+        run: /tmp/quaveone deploy --env filipenevola-br-cs-calendar-sync-production --wait --poll-interval-seconds 15

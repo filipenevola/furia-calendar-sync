@@ -1,27 +1,15 @@
-/**
- * Application configuration
- */
+export const GOOGLE_CREDENTIALS = process.env.GOOGLE_CREDENTIALS;
 
-export const GOOGLE_CREDENTIALS = process.env.GOOGLE_CREDENTIALS; // Base64 encoded service account JSON
-
-// Decode GOOGLE_CALENDAR_ID if it's base64 encoded, otherwise use as-is
-function decodeCalendarId(calendarId) {
-  if (!calendarId || calendarId === 'primary') {
-    return 'primary';
+export function decodeCalendarId(value) {
+  if (!value || value === 'primary') return 'primary';
+  if (value.includes('@')) return value;
+  if (/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+    const decoded = Buffer.from(value, 'base64').toString('utf8');
+    if (/^[^\s@]+@[^\s@]+$/.test(decoded)) return decoded;
   }
-  
-  // Try to decode as base64, if it fails, use as-is
-  try {
-    const decoded = Buffer.from(calendarId, 'base64').toString('utf-8');
-    // If decoded value looks like an email or calendar ID, use it
-    if (decoded.includes('@') || decoded.length > 0) {
-      return decoded;
-    }
-  } catch (e) {
-    // Not base64, use as-is
-  }
-  
-  return calendarId;
+  return value;
 }
-
-export const GOOGLE_CALENDAR_ID = decodeCalendarId(process.env.GOOGLE_CALENDAR_ID) || 'primary';
+export const GOOGLE_CALENDAR_ID = decodeCalendarId(process.env.GOOGLE_CALENDAR_ID);
+export const CALENDAR_TIME_ZONE = process.env.CALENDAR_TIME_ZONE || 'America/Campo_Grande';
+// Validate the IANA name immediately. Match timestamps always remain UTC instants.
+new Intl.DateTimeFormat('en', { timeZone: CALENDAR_TIME_ZONE }).format();

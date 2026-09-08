@@ -1,8 +1,2 @@
-import { createServer } from './server.js';
-import { startCronScheduler } from './cron.js';
-
-// Start the cron scheduler for daily sync
-startCronScheduler();
-
-// Start the web server
-createServer();
+// Compatibility entry point. A Job performs exactly one sync and exits.
+import './job.js';

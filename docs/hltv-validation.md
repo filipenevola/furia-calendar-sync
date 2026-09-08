@@ -37,9 +37,9 @@ fixtures in every run.
 
 ## Release gate
 
-Pending: successful repeated us-5 reads, live Calendar plan, write + idempotent
-repeat, scheduled JobRun, and stopped old environment. Do not claim cutover based
-on local tests or JOB_READY alone.
+Required: repeated us-5 reads, live Calendar plan, write + idempotent repeat,
+scheduled JobRun, and stopped old environment. Evidence is recorded below; local
+tests or JOB_READY alone do not meet the gate.
 
 ## v2 gate passed (read-only)
 
@@ -52,3 +52,37 @@ on local tests or JOB_READY alone.
 - Runtime-variable values and BUILD/DEPLOY scope compared equal against all four
   original variables. Secret values never included in evidence or source control.
 - Same 24 tests/84 assertions pass under both `TZ=UTC` and `TZ=Pacific/Auckland`.
+
+## Cutover and real Calendar writes
+
+- PR #1 merged as `590b843`; GitHub Actions run `34227241481` passed tests and
+  deployed v3 (`WW5SshWHJBYbwB4Wb`) to **JOB_READY**, waiting for terminal deploy.
+- Old App confirmed **STOPPED** via MCP and dashboard at 12:39:46Z. Its v5 content,
+  variables, volume and restart action are retained. No delete operation used.
+- New environment `DRY_RUN=false`; applied command `bun run src/job.js`;
+  concurrency 1, backoff 0, timeout 600s, no pending changes.
+- First real JobRun `MAeH4jxNjonn6iypp`: **SUCCEEDED**, exit 0,
+  12:40:24Z–12:40:48Z. **3 creates, 0 updates**.
+- Repeat + independent Calendar readback JobRun `dpkrcpJm8kQ943fJD`:
+  **SUCCEEDED**, exit 0, 12:41:04Z–12:41:48Z. **0 creates, 3 updates**.
+  Readback at 12:41:44Z confirmed exactly one event for each HLTV ID, correct
+  summary, absolute start instant and `America/Campo_Grande` timezone.
+- No upcoming FURIA event needed migration at cutover; legacy adoption is covered
+  by deterministic tests, not claimed as exercised on a real future FURIA event.
+
+## Scheduled execution proof — release complete
+
+- A temporary date-specific cron scheduled one controlled occurrence for
+  12:43:00Z (08:43 America/Campo_Grande); it was not an API/manual run.
+- JobRun `9KvKSwdkJgJyWrXYS`, trigger **SCHEDULED**, content v3:
+  **SUCCEEDED**, exit 0, 12:43:00Z–12:43:23Z.
+- After that terminal success the schedule was restored to the final cadence:
+  **enabled**, `*/30 * * * *`, `America/Campo_Grande`, revision 3.
+- This proves source access from us-5, real Calendar writes, idempotency and the
+  Quave ONE schedule-to-JobRun execution path. It is a bounded rollout test, not
+  a claim of long-term HLTV availability. Future access/layout failures remain
+  visible as failed runs with the previous calendar contents intact.
+
+All release gates passed. The old App remains stopped and recoverable; no side
+worktree was created. CI now uses a dedicated new-environment secret and never
+addresses the old production environment.

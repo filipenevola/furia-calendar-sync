@@ -215,3 +215,61 @@ test('conflicting pending opponent labels are not silently deduplicated', () => 
   const pending = { ...example, opponentId: null, opponent: 'A/B winner' };
   expect(() => processMatches([pending, { ...pending, opponent: 'C/D winner' }], now)).toThrow('Conflicting');
 });
+
+test('preserves Pager -n prefix while regenerating title and updating all other fields', () => {
+  const changed = { ...example, opponent: 'FURIA', opponentId: 8297, date: new Date(+example.date + 55 * 60000) };
+  for (const title of ['-n Old opponent', '  -n Old opponent', '-n', '-nOld opponent']) {
+    const old = { ...managed('hltv_2397604'), summary: title };
+    const entry = planCalendarSync([changed], [old])[0];
+    expect(entry.resource).toEqual({ ...matchToCalendarEvent(changed), summary: '-n 🎮 MIBR vs FURIA (MD3)' });
+    expect(entry.eventId).toBe('old');
+  }
+});
+test('does not invent -n for new events or titles without the leading marker', () => {
+  for (const title of [undefined, '', 'Old -n opponent', '🎮 MIBR vs 9z']) {
+    expect(planCalendarSync([example], [{ ...managed('hltv_2397604'), summary: title }])[0].resource.summary)
+      .toBe('🎮 MIBR vs 9z (MD3)');
+  }
+  expect(planCalendarSync([example], [])[0].resource.summary).toBe('🎮 MIBR vs 9z (MD3)');
+});
+test('legacy adoption also preserves the no-alarm prefix', () => {
+  const match = { ...example, team: 'FURIA', teamId: 8297 };
+  const old = { ...managed('furia_vs_9z_old_competition'), summary: '-n Old title' };
+  expect(planCalendarSync([match], [old])[0]).toMatchObject({
+    action: 'update', eventId: 'old', migrated: true, resource: { summary: '-n 🎮 FURIA vs 9z (MD3)' },
+  });
+});
+test('dry-run and repeat writes retain one -n; user removal is respected', async () => {
+  let item = { ...managed('hltv_2397604'), summary: '-n Old title' };
+  let patches = 0;
+  const calendar = { events: {
+    list: async () => ({ data: { items: [item] } }),
+    patch: async ({ eventId, resource }) => { patches++; item = { id: eventId, ...resource }; },
+  } };
+  const dry = await syncMatchesToCalendar([example], { calendar, dryRun: true });
+  expect(dry.planned[0].summary).toBe('-n 🎮 MIBR vs 9z (MD3)');
+  expect(patches).toBe(0);
+  for (let i = 0; i < 3; i++) await syncMatchesToCalendar([example], { calendar });
+  expect(item.summary).toBe('-n 🎮 MIBR vs 9z (MD3)');
+  expect(patches).toBe(3);
+  item.summary = '🎮 MIBR vs 9z (MD3)';
+  await syncMatchesToCalendar([example], { calendar });
+  expect(item.summary).toBe('🎮 MIBR vs 9z (MD3)');
+});
+test('insert conflict recovery preserves the prefix on the existing remote event', async () => {
+  let written;
+  const calendar = { events: {
+    list: async () => ({ data: { items: [] } }),
+    insert: async () => { throw { code: 409 }; },
+    get: async () => ({ data: { ...managed('hltv_2397604'), summary: '-n Old title' } }),
+    patch: async ({ resource }) => { written = resource; },
+  } };
+  const result = await syncMatchesToCalendar([example], { calendar });
+  expect(written.summary).toBe('-n 🎮 MIBR vs 9z (MD3)');
+  expect(result.planned[0].summary).toBe(written.summary);
+  expect(result.updated).toBe(1);
+});
+test('calendar verifier expected title recognizes preserved -n', () => {
+  expect(matchToCalendarEvent(example, '-n old').summary).toBe('-n 🎮 MIBR vs 9z (MD3)');
+  expect(matchToCalendarEvent(example).summary).toBe('🎮 MIBR vs 9z (MD3)');
+});

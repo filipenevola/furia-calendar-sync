@@ -39,6 +39,10 @@ not as a production dependency.
 - Existing Draft5 FURIA events are adopted **in place** only when opponent and
   start time (within six hours) uniquely identify them. Ambiguity aborts the plan
   before writes. A repeat sync cannot create a second copy of a migrated event.
+- A title starting with `-n` (ignoring leading whitespace, as in Pager) keeps
+  that marker on every update. Example: `-n 🎮 Legacy vs FURIA`. Date, opponent
+  and other source-managed fields still update normally. Remove the prefix in
+  Calendar to stop preserving it. New events do not get the prefix automatically.
 - No automatic event deletion: disappearance from an upcoming list is not proof
   of cancellation. Existing entries for disappeared/cancelled matches need review.
 - API write errors exit nonzero. Partial writes can safely be rerun by stable ID.

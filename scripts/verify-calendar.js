@@ -9,7 +9,7 @@ try {
   const verified = upcoming.map(match => {
     const key = getMatchUniqueKey(match);
     const found = events.filter(e => e.extendedProperties?.private?.fixtureId === key);
-    const expected = matchToCalendarEvent(match);
+    const expected = matchToCalendarEvent(match, found[0]?.summary);
     if (found.length !== 1 || Date.parse(found[0].start?.dateTime) !== +match.date ||
         found[0].start?.timeZone !== expected.start.timeZone || found[0].summary !== expected.summary) {
       throw new Error(`Calendar verification mismatch: ${key}`);

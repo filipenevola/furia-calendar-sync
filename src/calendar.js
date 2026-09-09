@@ -3,10 +3,16 @@ import { google } from 'googleapis';
 import { GOOGLE_CREDENTIALS, GOOGLE_CALENDAR_ID, CALENDAR_TIME_ZONE } from './config.js';
 import { getMatchUniqueKey } from './processing.js';
 
-export function matchToCalendarEvent(match) {
+// Match Pager's ignore rule, including leading whitespace. The rest of the
+// title stays source-managed; removing the marker in Calendar re-enables alarms.
+export function preserveNoAlarmPrefix(summary, existingSummary) {
+  return String(existingSummary || '').trimStart().startsWith('-n') ? `-n ${summary}` : summary;
+}
+
+export function matchToCalendarEvent(match, existingSummary) {
   const durationHours = match.format === 'MD5' ? 3.5 : match.format === 'MD1' ? 1 : 2;
   return {
-    summary: `🎮 ${match.team} vs ${match.opponent}${match.format ? ` (${match.format})` : ''}`,
+    summary: preserveNoAlarmPrefix(`🎮 ${match.team} vs ${match.opponent}${match.format ? ` (${match.format})` : ''}`, existingSummary),
     description: [
       `🏆 ${match.competition}`, match.location ? `📍 ${match.location}` : '',
       match.format ? `🎯 Format: ${match.format}` : '', `Source: ${match.url}`,
@@ -75,6 +81,7 @@ export function planCalendarSync(matches, existing) {
       }
       migrated = candidates.length === 1;
     }
+    resource.summary = preserveNoAlarmPrefix(resource.summary, candidates[0]?.summary);
     const eventId = candidates[0]?.id;
     if (eventId && used.has(eventId)) throw new Error('Two matches would overwrite one existing event');
     if (eventId) used.add(eventId);
@@ -103,6 +110,9 @@ export async function syncMatchesToCalendar(matches, { dryRun = false, calendar 
         // Resolve an uncertain earlier insert without creating a duplicate or touching unrelated events.
         const { data } = await calendar.events.get({ calendarId, eventId: entry.eventId });
         if (data.status === 'cancelled' || data.extendedProperties?.private?.fixtureId !== entry.fixtureId || data.extendedProperties?.private?.furiaSync !== 'true') throw new Error('Calendar event ID collision');
+        entry.resource.summary = preserveNoAlarmPrefix(entry.resource.summary, data.summary);
+        const planned = result.planned.find(p => p.fixtureId === entry.fixtureId);
+        planned.summary = entry.resource.summary;
         await calendar.events.patch({ calendarId, eventId: entry.eventId, resource: entry.resource });
         result.updated++;
       }

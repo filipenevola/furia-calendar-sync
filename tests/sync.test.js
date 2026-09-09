@@ -170,3 +170,48 @@ test('source-only dry run never touches calendar and write failures propagate', 
    expect(result.matches).toHaveLength(4);
    expect(result.matches.every(m => m.competition.length > 3 && m.format === '')).toBe(true);
  });
+
+test('captured bracket placeholders have labels, not fabricated opponent IDs', async () => {
+  for (const [team, label] of [[TEAMS[1], 'PARIVISION/FURIA winner'], [TEAMS[3], 'Astralis/BETBOOM winner']]) {
+    const rows = parseTeamPage(await fixture(team.slug + '-pending'), team);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].teams).toEqual([{ id: team.id, name: team.name }, { id: null, name: label }]);
+    expect(rows[0].date.toISOString()).toBe('2026-09-10T09:00:00.000Z');
+  }
+});
+test('unknown or broken linked opponents still fail closed', async () => {
+  const html = await fixture('legacy-pending');
+  expect(() => parseTeamPage(html.replaceAll('PARIVISION/FURIA winner', 'unrecognized'), TEAMS[1])).toThrow('Invalid HLTV team');
+  expect(() => parseTeamPage(html.replace('<span class="team-name team-2">', '<a href="/broken" class="team-name team-2">'), TEAMS[1])).toThrow();
+  for (const label of ['TBD', 'TBA', 'PARIVISION/FURIA loser']) {
+    expect(parseTeamPage(html.replaceAll('PARIVISION/FURIA winner', label), TEAMS[1])[0].teams[1]).toEqual({ id: null, name: label });
+  }
+});
+test('pending opponents do not block FURIA rescheduling; resolution updates the same event', async () => {
+  const retrieved = await fetchMatches({ now, sleep: noSleep, fetchPage: async url => {
+    const team = TEAMS.find(t => url.endsWith('/' + t.id + '/' + t.slug));
+    return fixture(team.slug + ([12468, 9215].includes(team.id) ? '-pending' : ''));
+  } });
+  expect(retrieved.matches).toHaveLength(4);
+  const pending = retrieved.matches.find(m => m.team === 'Legacy');
+  const resource = matchToCalendarEvent(pending);
+  expect(resource.summary).toBe('🎮 Legacy vs PARIVISION/FURIA winner');
+  expect(resource.extendedProperties.private.teamIds).toBe('12468');
+  const items = []; let inserts = 0; let patches = 0;
+  const calendar = { events: {
+    list: async () => ({ data: { items } }),
+    insert: async ({ resource }) => { inserts++; items.push(resource); },
+    patch: async ({ eventId, resource }) => { patches++; items[items.findIndex(e => e.id === eventId)] = { id: eventId, ...resource }; },
+  } };
+  await syncMatchesToCalendar(retrieved.matches, { calendar });
+  const furia = retrieved.matches.find(m => m.team === 'FURIA');
+  const moved = { ...furia, date: new Date(+furia.date + 55 * 60000) };
+  await syncMatchesToCalendar([moved, { ...pending, opponent: 'FURIA', opponentId: 8297 }], { calendar });
+  expect(inserts).toBe(4); expect(patches).toBe(2); expect(items).toHaveLength(4);
+  expect(items.find(e => e.extendedProperties.private.fixtureId === getMatchUniqueKey(furia)).start.dateTime).toBe(moved.date.toISOString());
+  expect(items.find(e => e.extendedProperties.private.fixtureId === getMatchUniqueKey(pending)).summary).toBe('🎮 Legacy vs FURIA');
+});
+test('conflicting pending opponent labels are not silently deduplicated', () => {
+  const pending = { ...example, opponentId: null, opponent: 'A/B winner' };
+  expect(() => processMatches([pending, { ...pending, opponent: 'C/D winner' }], now)).toThrow('Conflicting');
+});

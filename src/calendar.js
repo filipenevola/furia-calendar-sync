@@ -19,7 +19,7 @@ export function matchToCalendarEvent(match) {
     reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 60 }, { method: 'popup', minutes: 15 }] },
     extendedProperties: { private: {
       furiaSync: 'true', fixtureId: getMatchUniqueKey(match), source: 'hltv.org',
-      teamIds: [match.teamId, match.opponentId].sort((a, b) => a - b).join(','),
+      teamIds: [match.teamId, match.opponentId].filter(Number.isInteger).sort((a, b) => a - b).join(','),
     } },
   };
 }

@@ -10,7 +10,7 @@ export function processMatches(matches, now = new Date()) {
     if (match.date <= now) continue;
     const key = getMatchUniqueKey(match);
     const prior = unique.get(key);
-    if (prior && (prior.date.getTime() !== match.date.getTime() || prior.teamId !== match.teamId || prior.opponentId !== match.opponentId)) {
+    if (prior && (prior.date.getTime() !== match.date.getTime() || prior.teamId !== match.teamId || prior.opponentId !== match.opponentId || (!match.opponentId && prior.opponent !== match.opponent))) {
       throw new Error(`Conflicting duplicate match ${key}`);
     }
     unique.set(key, match);

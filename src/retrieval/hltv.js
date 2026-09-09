@@ -45,10 +45,18 @@ export function parseTeamPage(html, team) {
     const row = $(el).closest('tr');
     const path = $(el).attr('href');
     const matchId = path?.match(/^\/matches\/(\d+)\/[a-z0-9-]+$/)?.[1];
-    const teams = row.find('a.team-name').toArray().map(t => ({
-      id: Number($(t).attr('href')?.match(/^\/team\/(\d+)\//)?.[1]), name: clean($(t).text()),
-    }));
-    if (!matchId || teams.length !== 2 || !teams.some(t => t.id === team.id) || teams.some(t => !t.id || !t.name)) {
+    const teams = row.find('.team-name').toArray().map(t => {
+      const name = clean($(t).text());
+      const href = $(t).attr('href');
+      const id = Number(href?.match(/^\/team\/(\d+)\//)?.[1]);
+      // HLTV renders bracket placeholders as spans, not linked teams.
+      // Keep the exact label; never invent an ID or infer the bracket winner.
+      const pending = $(t).is('span') && !href &&
+        /^(?:TBD|TBA|.+(?:\/| vs\.? ).+ (?:winner|loser))$/i.test(name);
+      if (!id && !pending) throw new Error(`Invalid HLTV team in match ${matchId} for ${team.name}`);
+      return { id: id || null, name };
+    });
+    if (!matchId || teams.length !== 2 || !teams.some(t => t.id === team.id) || teams.some(t => !t.name)) {
       throw new Error(`Invalid HLTV match row for ${team.name}`);
     }
     const competition = clean(row.closest('tbody').prevAll('thead').first().find('.event-header-cell a').text());
@@ -116,7 +124,7 @@ export async function fetchMatches({ fetchPage = fetchHTML, sleep = ms => new Pr
     for (const row of rows) {
       const previous = references.get(row.matchId);
       if (previous && (previous.date.getTime() !== row.date.getTime() ||
-        previous.teams.map(t => t.id).sort().join() !== row.teams.map(t => t.id).sort().join())) {
+        previous.teams.map(t => t.id || t.name).sort().join() !== row.teams.map(t => t.id || t.name).sort().join())) {
         throw new Error(`Conflicting HLTV team pages for ${row.matchId}; retry next run`);
       }
       references.set(row.matchId, row);

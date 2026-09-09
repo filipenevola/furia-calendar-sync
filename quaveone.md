@@ -10,8 +10,8 @@ Account: **filipenevola**, `KPADFfTBDQnk8J2Yv`.
 - Resources: 1 zCloud, 0.5 CPU, 512 MB. No public host or persistent volume.
 - Job: `bun run src/job.js`, `/app`, timeout 600s, backoff 0, maxConcurrency 1.
 - Schedule: **enabled**, `*/30 * * * *`, `America/Campo_Grande`, revision 3.
-- Production content: **v3**, `WW5SshWHJBYbwB4Wb`, git `590b843`.
-- Scheduled proof: JobRun `9KvKSwdkJgJyWrXYS` SUCCEEDED, exit 0.
+- Production content: **v4**, `SohTq5xNukSbjWmQ7`, git `289945b`.
+- Scheduled proof: JobRun `dSddc6QRBPQseq3hP` (2026-09-09 13:00Z) SUCCEEDED, exit 0.
 - Variables copied from old production, retaining values and build/runtime scope.
   Slack webhook is now marked secret. `CALENDAR_TIME_ZONE` and `DRY_RUN` are added.
 - Cutover applied: `DRY_RUN=false`, environment command `bun run src/job.js`.
@@ -32,3 +32,6 @@ Account: **filipenevola**, `KPADFfTBDQnk8J2Yv`.
 
 See `docs/hltv-validation.md` for release state and evidence. No secret values
 belong in this file. Never use the old environment token to deploy the new code.
+
+See `docs/hltv-pending-opponents-incident.md` for the September 9 fix, real
+FURIA reschedule readback, and separate infrastructure investigation.

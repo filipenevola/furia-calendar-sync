@@ -32,10 +32,16 @@ not as a production dependency.
   A blocked page is retried once after 60 seconds. If it is blocked again, the
   run is **skipped**: Calendar is not read or written, a `"status":"skipped"`
   line with the reason is logged, and the job exits 0 without a Slack alert.
-  A block is never treated as an empty schedule. See
+  A block is never treated as an empty schedule. Consecutive blocked runs are
+  counted; Slack gets one warning on every 10th (`BLOCK_NOTIFY_EVERY`) and a
+  successful sync resets the count. The counter is a private event in the service
+  account's **own** calendar (not the shared one), since the Job has no volume. See
   [the 2026-10-13 incident](docs/hltv-403-incident.md).
 - Malformed timestamps, missing sections, other HTTP errors and conflicting data
-  fail the run (exit 1, Slack alert); they are not successful empty schedules.
+  fail the run (exit 1); they are not successful empty schedules. Real failures
+  are sent to **Filipe Nevola Factory** (the Warren work controller, `POST /work`),
+  which investigates and opens a fix PR or asks on GitHub. Repeats of the same
+  failure join the open work item. The Slack error says what failed and the work ID.
 - An explicit "No upcoming matches" section is a valid empty result.
 - Only future matches are synchronized; live and completed matches are omitted.
 - `hltv_<matchId>` identifies an event across rescheduling. A derby appears once,
@@ -69,7 +75,9 @@ Credentials are needed only for calendar access. `GOOGLE_CREDENTIALS` accepts a
 Google service-account JSON object or its base64 encoding. Share the existing
 calendar with that service account with edit access. `GOOGLE_CALENDAR_ID` accepts
 its raw ID or base64-encoded ID. Do not commit credentials. Optional
-`SLACK_ERROR_WEBHOOK` preserves failure notifications. `DRY_RUN=true` is an
+`SLACK_ERROR_WEBHOOK` preserves failure notifications. `FACTORY_WORK_BEARER`
+(secret, the work controller's `WORK_BEARER`) enables Factory reports;
+`FACTORY_WORK_URL` overrides the controller URL. `DRY_RUN=true` is an
 additional environment-level write guard; `--dry-run` always prevents writes.
 `VALIDATION_ROUNDS` and `VALIDATION_INTERVAL_MS` tune the read-only live script.
 

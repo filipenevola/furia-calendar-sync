@@ -1,10 +1,5 @@
 import { createLogger } from '@quave/logger';
 
-const REPO = 'filipenevola/furia-calendar-sync';
-const BRANCH = process.env.GIT_BRANCH || 'main';
-const APP_ENV_ID = process.env.QUAVE_APP_ENV_ID || 'rt4rMyvTuqNBZiZLX';
-const CURSOR_TAG = `<@U0A52LNRDK3> repo=${REPO}, branch=${BRANCH}\nUse Quave ONE MCP to investigate: get-logs appEnvId=${APP_ENV_ID}, get-app-env-status appEnvId=${APP_ENV_ID}, get-app-env-pods appEnvId=${APP_ENV_ID}`;
-
 // Initialize logger with Slack error webhook
 const slackWebhookUrl = process.env.SLACK_ERROR_WEBHOOK;
 
@@ -25,7 +20,7 @@ if (process.env.SLACK_ERROR_WEBHOOK && !isSlackEnabled) {
   console.warn('[LOGGER] SLACK_ERROR_WEBHOOK not set - Slack notifications disabled');
 }
 
-const baseLogger = createLogger({
+export const logger = createLogger({
   appName: 'br-cs-calendar-sync',
   environment: process.env.NODE_ENV || 'production',
   debug: {
@@ -41,16 +36,6 @@ const baseLogger = createLogger({
     skipInDevelopment: false,
   },
 });
-
-export const logger = {
-  ...baseLogger,
-  error(message, ...rest) {
-    baseLogger.error(`${message}\n\n${CURSOR_TAG}\n\nwhat is going on?`, ...rest);
-  },
-  errorBackground(message, ...rest) {
-    baseLogger.errorBackground(`${message}\n\n${CURSOR_TAG}\n\nwhat is going on?`, ...rest);
-  },
-};
 
 // Helper to ensure errors are always Error objects for proper Slack formatting
 export function ensureError(error) {

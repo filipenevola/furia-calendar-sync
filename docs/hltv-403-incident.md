@@ -50,3 +50,20 @@ since the sync never deletes events.
 - First scheduled run on the new content: `wGfNCbHu7ZFpbeSqd` (10:30) SUCCEEDED,
   exit 0. Coverage listed only FURIA, Legacy and MIBR. HLTV did not block that
   run, so the skip path has been proven only by tests and the local live retry.
+
+## Follow-up: block streak and Factory reporting (same day)
+
+Filipe saw Slack errors after the first fix; all eight were from before it was deployed.
+He asked to stay quiet about 403s unless they persist, to drop the Cursor tag, and
+to send real failures to Filipe Nevola Factory.
+
+- Consecutive skipped runs are counted in one private event on the service account's
+  own calendar. Slack gets one warning on blocked runs 10, 20, 30, …
+  (`BLOCK_NOTIFY_EVERY`). Any successful sync resets the count, so blocks that come
+  and go never notify. The counter only matters when HLTV stops the sync for hours.
+- Real failures `POST /work` to the work controller with a stable fingerprint
+  (numbers and URLs normalized), so repeats join the open work item. A reporting
+  failure is logged and never hides the original error.
+- The Slack error no longer tags Cursor; it states the failure and the Factory work ID.
+- `FACTORY_WORK_BEARER` was added as a secret runtime variable on
+  `rt4rMyvTuqNBZiZLX` (the controller's `WORK_BEARER`).

@@ -42,3 +42,11 @@ request per run. A FURIA/Legacy/MIBR match against paiN still syncs from the
 tracked team's page. The 10:00 run listed 0 upcoming paiN matches, so the Calendar
 has no future paiN-only events to clean up. Past events were left as they are,
 since the sync never deletes events.
+
+## Production verification
+
+- PR #4, merge commit 91f98013b9ded3de247a584ddae31d0afc03c2aa. CI run 38383547668:
+  tests passed and the deploy succeeded (new content `YsKGxpDWNbLNRbYMz`).
+- First scheduled run on the new content: `wGfNCbHu7ZFpbeSqd` (10:30) SUCCEEDED,
+  exit 0. Coverage listed only FURIA, Legacy and MIBR. HLTV did not block that
+  run, so the skip path has been proven only by tests and the local live retry.

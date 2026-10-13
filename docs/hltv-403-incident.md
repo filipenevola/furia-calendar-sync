@@ -67,3 +67,8 @@ to send real failures to Filipe Nevola Factory.
 - The Slack error no longer tags Cursor; it states the failure and the Factory work ID.
 - `FACTORY_WORK_BEARER` was added as a secret runtime variable on
   `rt4rMyvTuqNBZiZLX` (the controller's `WORK_BEARER`).
+- PR #5, merge dea8ae1; deployed as content `NKKbsmP5PXKLkLiyp`. One-off production
+  JobRun `eYYuvgpog5pRGBoru` used the real service account to record blocked runs
+  (1, 2), reset (`previousStreak` 2, then 0), and `GET /work` → 200 with the bearer.
+  No synthetic failure was posted, so no paid Factory investigation was started.
+- Same Factory reporting shipped to palmeiras-calendar-sync (PR #3, bf0082a, v65).

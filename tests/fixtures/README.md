@@ -9,3 +9,6 @@ The runtime uses only team pages; match-detail pages are not required.
 2026-09-09: legacy-pending.html and mibr-pending.html capture the real upcoming
 bracket placeholders (2397617 and 2397613) as spans without team IDs. They
 reproduce the production parser failures preceding the missed FURIA reschedule.
+
+2026-10-13: paiN is no longer synced. pain.html stays as a generic parser fixture
+(recent-results exclusion and malformed rows), not as a production team page.

@@ -1,11 +1,14 @@
 import { test, expect } from 'bun:test';
 import { load } from 'cheerio';
 import { readFile } from 'node:fs/promises';
-import { TEAMS, parseTeamPage, parseMatchPage, parseTimestamp, fetchHTML, fetchMatches } from '../src/retrieval/hltv.js';
+import { TEAMS, BLOCK_RETRY_DELAY_MS, parseTeamPage, parseMatchPage, parseTimestamp, fetchHTML, fetchMatches } from '../src/retrieval/hltv.js';
 import { processMatches, getMatchUniqueKey } from '../src/processing.js';
 import { matchToCalendarEvent, parseCredentials, planCalendarSync, getExistingEvents, syncMatchesToCalendar } from '../src/calendar.js';
 import { decodeCalendarId } from '../src/config.js';
 import { sync } from '../src/sync.js';
+// paiN is no longer synced; its captured page still exercises the generic parser.
+const PAIN = { id: 4773, name: 'paiN', slug: 'pain' };
+const MIBR_TEAM = TEAMS.find(t => t.name === 'MIBR');
 const fixture = name => readFile(new URL(`fixtures/${name}.html`, import.meta.url), 'utf8');
 const noSleep = async () => {};
 const now = new Date('2026-09-08T00:00:00Z');
@@ -51,13 +54,13 @@ test('recent results are excluded even if they contain future timestamps', async
   const $ = load(html);
   const duplicateTable = $('table').toString().replaceAll('2397731', '9999999');
   $('#matchesBox').append('<h2>Recent results for paiN</h2>' + duplicateTable);
-  expect(parseTeamPage($.html(), TEAMS[2])).toHaveLength(1);
+  expect(parseTeamPage($.html(), PAIN)).toHaveLength(1);
 });
 test('malformed row fails rather than disappearing', async () => {
-  expect(() => parseTeamPage(awaitedPain.replace('1788994800000', 'TBD'), TEAMS[2])).toThrow();
+  expect(() => parseTeamPage(awaitedPain.replace('1788994800000', 'TBD'), PAIN)).toThrow();
 });
 test('match details reject identity drift and skip explicitly postponed fixtures', async () => {
-  const ref = parseTeamPage(await fixture('mibr'), TEAMS[3])[0];
+  const ref = parseTeamPage(await fixture('mibr'), MIBR_TEAM)[0];
   const html = await fixture(`match-${ref.matchId}`);
   expect(() => parseMatchPage(html.replace('/team/9215/', '/team/1/'), ref)).toThrow();
   expect(parseMatchPage(html.replace('Best of 3', 'Postponed. Best of 3'), ref)).toBeNull();
@@ -71,7 +74,7 @@ test('same match deduplicates but rematches in same competition remain separate'
   expect(() => processMatches([example, { ...example, date: new Date(+example.date + 60000) }], now)).toThrow();
 });
 test('derby uses canonical tracked side and one match id', async () => {
-  const ref = parseTeamPage(await fixture('mibr'), TEAMS[3])[0];
+  const ref = parseTeamPage(await fixture('mibr'), MIBR_TEAM)[0];
   ref.teams = [{ id: 8297 }, { id: 9215 }];
   const html = (await fixture(`match-${ref.matchId}`)).replaceAll('/team/9996/9z', '/team/8297/furia').replaceAll('>9z<', '>FURIA<');
   const match = parseMatchPage(html, ref);
@@ -86,13 +89,42 @@ test('one inaccessible team aborts retrieval before calendar writes', async () =
   } }), writeCalendar: async () => { writes++; } })).rejects.toThrow('403');
   expect(writes).toBe(0);
 });
+test('paiN is no longer synced', () => {
+  expect(TEAMS.map(t => t.name)).toEqual(['FURIA', 'Legacy', 'MIBR']);
+});
+test('a blocked team page is retried once after a pause and the run continues', async () => {
+  const sleeps = []; const calls = {};
+  const result = await fetchMatches({ now, sleep: async ms => { sleeps.push(ms); }, fetchPage: async url => {
+    const team = TEAMS.find(t => url.endsWith(`/${t.id}/${t.slug}`));
+    calls[team.slug] = (calls[team.slug] || 0) + 1;
+    if (team.slug === 'legacy' && calls.legacy === 1) throw Object.assign(new Error('HLTV HTTP 403'), { blocked: true });
+    return fixture(team.slug);
+  } });
+  expect(calls).toEqual({ furia: 1, legacy: 2, mibr: 1 });
+  expect(sleeps).toContain(BLOCK_RETRY_DELAY_MS);
+  expect(result.blocks).toEqual([{ team: 'Legacy', message: 'HLTV HTTP 403' }]);
+});
+test('a persistent block skips the run without touching the Calendar', async () => {
+  let writes = 0; let fetches = 0;
+  const result = await sync({ retrieve: () => fetchMatches({ now, sleep: noSleep, fetchPage: async url => {
+    fetches++;
+    if (url.includes('/8297/')) return fixture('furia');
+    return '<title>Just a moment...</title>';
+  } }), writeCalendar: async () => { writes++; } });
+  expect(result).toMatchObject({ status: 'skipped', calendar: 'untouched' });
+  expect(result.reason).toContain('access challenge');
+  expect(fetches).toBe(3);
+  expect(writes).toBe(0);
+});
 test('HTTP errors: bounded transient retry; no retry of access block or rate limit', async () => {
   let calls = 0;
   expect(await fetchHTML('https://www.hltv.org', { sleep: noSleep, fetchImpl: async () => { calls++; return new Response(calls < 3 ? '' : 'ok', { status: calls < 3 ? 503 : 200 }); } })).toBe('ok');
   expect(calls).toBe(3);
   for (const status of [403, 429]) {
     calls = 0;
-    await expect(fetchHTML('https://www.hltv.org', { sleep: noSleep, fetchImpl: async () => { calls++; return new Response('', { status }); } })).rejects.toThrow(String(status));
+    const error = await fetchHTML('https://www.hltv.org', { sleep: noSleep, fetchImpl: async () => { calls++; return new Response('', { status }); } }).catch(e => e);
+    expect(error.message).toContain(String(status));
+    expect(error.blocked).toBe(true);
     expect(calls).toBe(1);
   }
 });
@@ -165,14 +197,14 @@ test('source-only dry run never touches calendar and write failures propagate', 
      if (!team) throw new Error('Detail endpoint must not be fetched');
      return fixture(team.slug);
    } });
-   expect(urls).toHaveLength(4);
-   expect(result.coverage.map(c => c.team)).toEqual(['FURIA', 'Legacy', 'paiN', 'MIBR']);
-   expect(result.matches).toHaveLength(4);
+   expect(urls).toHaveLength(3);
+   expect(result.coverage.map(c => c.team)).toEqual(['FURIA', 'Legacy', 'MIBR']);
+   expect(result.matches).toHaveLength(3);
    expect(result.matches.every(m => m.competition.length > 3 && m.format === '')).toBe(true);
  });
 
 test('captured bracket placeholders have labels, not fabricated opponent IDs', async () => {
-  for (const [team, label] of [[TEAMS[1], 'PARIVISION/FURIA winner'], [TEAMS[3], 'Astralis/BETBOOM winner']]) {
+  for (const [team, label] of [[TEAMS[1], 'PARIVISION/FURIA winner'], [MIBR_TEAM, 'Astralis/BETBOOM winner']]) {
     const rows = parseTeamPage(await fixture(team.slug + '-pending'), team);
     expect(rows).toHaveLength(1);
     expect(rows[0].teams).toEqual([{ id: team.id, name: team.name }, { id: null, name: label }]);
@@ -192,7 +224,7 @@ test('pending opponents do not block FURIA rescheduling; resolution updates the 
     const team = TEAMS.find(t => url.endsWith('/' + t.id + '/' + t.slug));
     return fixture(team.slug + ([12468, 9215].includes(team.id) ? '-pending' : ''));
   } });
-  expect(retrieved.matches).toHaveLength(4);
+  expect(retrieved.matches).toHaveLength(3);
   const pending = retrieved.matches.find(m => m.team === 'Legacy');
   const resource = matchToCalendarEvent(pending);
   expect(resource.summary).toBe('🎮 Legacy vs PARIVISION/FURIA winner');
@@ -207,7 +239,7 @@ test('pending opponents do not block FURIA rescheduling; resolution updates the 
   const furia = retrieved.matches.find(m => m.team === 'FURIA');
   const moved = { ...furia, date: new Date(+furia.date + 55 * 60000) };
   await syncMatchesToCalendar([moved, { ...pending, opponent: 'FURIA', opponentId: 8297 }], { calendar });
-  expect(inserts).toBe(4); expect(patches).toBe(2); expect(items).toHaveLength(4);
+  expect(inserts).toBe(3); expect(patches).toBe(2); expect(items).toHaveLength(3);
   expect(items.find(e => e.extendedProperties.private.fixtureId === getMatchUniqueKey(furia)).start.dateTime).toBe(moved.date.toISOString());
   expect(items.find(e => e.extendedProperties.private.fixtureId === getMatchUniqueKey(pending)).summary).toBe('🎮 Legacy vs FURIA');
 });

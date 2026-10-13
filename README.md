@@ -1,15 +1,15 @@
 # Brazilian CS Calendar Sync
 
-Finite Bun job that synchronizes **FURIA, Legacy, paiN and MIBR** matches from HLTV
+Finite Bun job that synchronizes **FURIA, Legacy and MIBR** matches from HLTV
 into the existing Google Calendar. The repository name is kept for compatibility.
 
 ## Source and time zones
 
-The authoritative source is each team's **Upcoming matches** section:
+The authoritative source is each team's **Upcoming matches** section
+(paiN stopped syncing on 2026-10-13; a FURIA/Legacy/MIBR match against paiN still syncs):
 
 - [FURIA — 8297](https://www.hltv.org/team/8297/furia)
 - [Legacy — 12468](https://www.hltv.org/team/12468/legacy)
-- [paiN — 4773](https://www.hltv.org/team/4773/pain)
 - [MIBR — 9215](https://www.hltv.org/team/9215/mibr)
 
 `data-unix` is an absolute UTC timestamp in **milliseconds**. Never parse the
@@ -19,7 +19,7 @@ Example: `2026-09-09T06:00:00Z` is **02:00 in Campo Grande**, not 03:00.
 The calendar viewer may display the event in their own selected timezone.
 
 HLTV match-detail pages can be blocked independently of team pages. Production
-uses only the four team pages; **format, venue and streams are omitted when not
+uses only the three team pages; **format, venue and streams are omitted when not
 confirmed**, rather than guessed. Event duration is an estimated two hours, not
 a guaranteed finish time. Each event links to its HLTV match page and has 60/15
 minute popup reminders. The detail parser remains for fixture cross-check tests,
@@ -27,9 +27,15 @@ not as a production dependency.
 
 ## Safety and identity
 
-- All four team pages must load and validate before any calendar write.
-- HTTP 403/429, challenge HTML, malformed timestamps, missing sections and
-  conflicting data fail the run; they are not successful empty schedules.
+- All team pages must load and validate before any calendar write.
+- HLTV intermittently blocks datacenter requests (HTTP 403/429 or challenge HTML).
+  A blocked page is retried once after 60 seconds. If it is blocked again, the
+  run is **skipped**: Calendar is not read or written, a `"status":"skipped"`
+  line with the reason is logged, and the job exits 0 without a Slack alert.
+  A block is never treated as an empty schedule. See
+  [the 2026-10-13 incident](docs/hltv-403-incident.md).
+- Malformed timestamps, missing sections, other HTTP errors and conflicting data
+  fail the run (exit 1, Slack alert); they are not successful empty schedules.
 - An explicit "No upcoming matches" section is a valid empty result.
 - Only future matches are synchronized; live and completed matches are omitted.
 - `hltv_<matchId>` identifies an event across rescheduling. A derby appears once,

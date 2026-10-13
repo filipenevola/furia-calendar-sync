@@ -36,5 +36,8 @@ belong in this file. Never use the old environment token to deploy the new code.
 See `docs/hltv-pending-opponents-incident.md` for the September 9 fix, real
 FURIA reschedule readback, and separate infrastructure investigation.
 
+See `docs/hltv-403-incident.md` for the October 13 HLTV block handling and
+paiN removal.
+
 See `docs/no-alarm-prefix-validation.md` for v5 prefix-preservation tests and
 production write/readback evidence.

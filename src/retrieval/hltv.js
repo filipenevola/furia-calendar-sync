@@ -3,11 +3,22 @@ import { load } from 'cheerio';
 export const TEAMS = Object.freeze([
   { id: 8297, name: 'FURIA', slug: 'furia' },
   { id: 12468, name: 'Legacy', slug: 'legacy' },
-  { id: 4773, name: 'paiN', slug: 'pain' },
   { id: 9215, name: 'MIBR', slug: 'mibr' },
 ]);
 const ORIGIN = 'https://www.hltv.org';
 const clean = value => value.replace(/\s+/g, ' ').trim();
+// Pause before the single retry of a page HLTV blocked (403/429/challenge).
+export const BLOCK_RETRY_DELAY_MS = 60000;
+
+// HLTV intermittently rejects datacenter requests. A block is not data: callers
+// skip the run with no Calendar access instead of treating it as a failure.
+export class HltvBlockedError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'HltvBlockedError';
+    this.blocked = true;
+  }
+}
 
 export function parseTimestamp(value) {
   // HLTV data-unix is UTC milliseconds, NOT the displayed browser-local time.
@@ -20,7 +31,7 @@ export function parseTimestamp(value) {
 function document(html) {
   const $ = load(html);
   if (/Just a moment|Access denied|Attention Required/i.test($('title').text())) {
-    throw new Error('HLTV returned an access challenge; refusing an empty successful sync');
+    throw new HltvBlockedError('HLTV returned an access challenge; refusing an empty successful sync');
   }
   return $;
 }
@@ -99,7 +110,9 @@ export async function fetchHTML(url, { fetchImpl = fetch, sleep = ms => new Prom
     try {
       const response = await fetchImpl(url, { signal: AbortSignal.timeout(30000) });
       if (!response.ok) {
-        const error = new Error(`HLTV HTTP ${response.status}: ${url}`);
+        const message = `HLTV HTTP ${response.status}: ${url}`;
+        if ([403, 429].includes(response.status)) throw new HltvBlockedError(message);
+        const error = new Error(message);
         error.noRetry = response.status < 500;
         throw error;
       }
@@ -108,7 +121,7 @@ export async function fetchHTML(url, { fetchImpl = fetch, sleep = ms => new Prom
       return html;
     } catch (error) {
       // Do not try to bypass access challenges/rate limits. Retry only transient failures.
-      if (error.noRetry || attempt === 2) throw error;
+      if (error.blocked || error.noRetry || attempt === 2) throw error;
       await sleep(1000 * (attempt + 1));
     }
   }
@@ -117,9 +130,21 @@ export async function fetchHTML(url, { fetchImpl = fetch, sleep = ms => new Prom
 export async function fetchMatches({ fetchPage = fetchHTML, sleep = ms => new Promise(r => setTimeout(r, ms)), now = new Date() } = {}) {
   const references = new Map();
   const coverage = [];
-  // All four pages must succeed before any calendar access/writes.
+  const blocks = [];
+  // Every team page must succeed before any calendar access/writes.
   for (const team of TEAMS) {
-    const rows = parseTeamPage(await fetchPage(`${ORIGIN}/team/${team.id}/${team.slug}`), team);
+    const url = `${ORIGIN}/team/${team.id}/${team.slug}`;
+    let rows;
+    try {
+      rows = parseTeamPage(await fetchPage(url), team);
+    } catch (error) {
+      // One patient retry per run; a second block propagates and the run is skipped.
+      if (!error.blocked || blocks.length) throw error;
+      blocks.push({ team: team.name, message: error.message });
+      console.warn(JSON.stringify({ status: 'warning', message: `${error.message}; retrying once in ${BLOCK_RETRY_DELAY_MS / 1000}s` }));
+      await sleep(BLOCK_RETRY_DELAY_MS);
+      rows = parseTeamPage(await fetchPage(url), team);
+    }
     coverage.push({ team: team.name, listed: rows.length, upcoming: rows.filter(r => r.date > now).length });
     for (const row of rows) {
       const previous = references.get(row.matchId);
@@ -134,7 +159,7 @@ export async function fetchMatches({ fetchPage = fetchHTML, sleep = ms => new Pr
   // Team pages are authoritative. Match-detail endpoints can be blocked independently;
   // don't make synchronization depend on optional BO/stream/venue enrichment.
   const matches = [...references.values()].map(referenceToMatch);
-  return { matches, coverage };
+  return { matches, coverage, blocks };
 }
 
 export function referenceToMatch(reference) {

@@ -1,0 +1,44 @@
+# HLTV 403 job failures — 2026-10-13
+
+All timestamps below are UTC unless explicitly localized.
+
+## What happened
+
+- Eight scheduled runs failed (exit 1, `BackoffLimitExceeded`): 2026-10-12
+  22:00 and 22:30, then 2026-10-13 00:00, 01:30, 03:30, 06:30, 07:30, 08:30.
+  There were no failed runs from 2026-10-06 until 22:00 on 2026-10-12.
+  Successful runs were interleaved; e.g. 09:00, 09:30, 10:00 succeeded on the
+  same content v5 (`vXn8zYA2HYYiRteF7`).
+- Inspected logs: 08:30 (`h86d8zPG7MXmkgGjb`) got `HLTV HTTP 403` on
+  `/team/8297/furia`; 07:30 (`WCoDKczjTW2DkWG9S`) got it on `/team/12468/legacy`.
+  The other six failures have the same signature (exit 1 within ~2 minutes) but
+  their logs were not opened.
+- Cause: HLTV intermittently blocks requests from the us-5 datacenter egress.
+  A local dry run from the Mac at 10:25 also got a 403 on `/team/9215/mibr`, then
+  loaded the page on the retry 60 seconds later. Quave ONE ran, reported and
+  alerted on the Job correctly; this was not a platform failure.
+- Impact: none on the Calendar. The all-pages-must-load gate stopped each failed
+  run before any Calendar access, and the next successful run brought it up to date.
+  The cost was a Slack alert for each blocked run.
+
+## Fix
+
+- A 403/429 or challenge page is an `HltvBlockedError` (`blocked: true`). It is
+  still never retried immediately and never treated as an empty schedule.
+- `fetchMatches` waits 60 seconds and retries a blocked team page **once per run**.
+  The block is logged as a `"status":"warning"` line and reported in `blocks`.
+- If HLTV blocks again, `sync` returns `"status":"skipped"` with the reason, without
+  reading or writing the Calendar. `job.js` logs that line and exits 0 with no Slack alert.
+- Every other failure (parser/layout drift, 5xx after retries, Calendar errors,
+  conflicting data) still exits 1 and alerts.
+- Known gap: the Job has no persistent state, so a block that lasts for hours
+  shows up only as consecutive `skipped` runs in the logs, without an alert.
+
+## paiN removed
+
+Filipe asked to stop syncing paiN on 2026-10-13. paiN (4773) was removed from
+`TEAMS`, so its team page is no longer fetched. This also means one fewer HLTV
+request per run. A FURIA/Legacy/MIBR match against paiN still syncs from the
+tracked team's page. The 10:00 run listed 0 upcoming paiN matches, so the Calendar
+has no future paiN-only events to clean up. Past events were left as they are,
+since the sync never deletes events.

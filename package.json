@@ -1,7 +1,7 @@
 {
   "name": "furia-calendar-sync",
   "version": "1.0.0",
-  "description": "Sync FURIA, Legacy, paiN and MIBR HLTV matches to Google Calendar",
+  "description": "Sync FURIA, Legacy and MIBR HLTV matches to Google Calendar",
   "main": "src/index.js",
   "type": "module",
   "scripts": {
@@ -13,7 +13,6 @@
   "keywords": [
     "furia",
     "legacy",
-    "pain",
     "mibr",
     "calendar",
     "hltv",

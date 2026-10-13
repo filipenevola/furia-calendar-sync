@@ -6,7 +6,9 @@ if (args.some(arg => !['--dry-run', '--check-calendar'].includes(arg))) throw ne
 const dryRun = args.includes('--dry-run') || process.env.DRY_RUN === 'true';
 try {
   const result = await sync({ dryRun, checkCalendar: args.includes('--check-calendar') });
-  console.log(JSON.stringify(result, null, 2));
+  // A skipped run is expected when HLTV blocks us: log it, exit 0, no Slack alert.
+  if (result.status === 'skipped') console.warn(JSON.stringify({ ...result, message: `Calendar sync skipped: ${result.reason}` }));
+  else console.log(JSON.stringify(result, null, 2));
 } catch (error) {
   // Do not serialize API request configs, credentials or response bodies.
   const message = `Calendar job failed: ${error.message}`;

@@ -1,35 +1,38 @@
 # Brazilian CS Calendar Sync
 
-Finite Bun job that synchronizes **FURIA, Legacy and MIBR** matches from HLTV
-into the existing Google Calendar. The repository name is kept for compatibility.
+Finite Bun job that synchronizes **FURIA, Legacy and MIBR** matches from
+Liquipedia into the existing Google Calendar. The repository name is kept for compatibility.
 
 ## Source and time zones
 
-The authoritative source is each team's **Upcoming matches** section
-(paiN stopped syncing on 2026-10-13; a FURIA/Legacy/MIBR match against paiN still syncs):
+Since 2026-10-15 the source is each team's **Upcoming Matches** section on
+Liquipedia, read through its MediaWiki API (`action=parse`). HLTV now answers
+every scripted request with a Cloudflare challenge, so it can no longer be used
+(see [the incident](docs/hltv-cloudflare-incident.md)).
 
-- [FURIA — 8297](https://www.hltv.org/team/8297/furia)
-- [Legacy — 12468](https://www.hltv.org/team/12468/legacy)
-- [MIBR — 9215](https://www.hltv.org/team/9215/mibr)
+- [FURIA](https://liquipedia.net/counterstrike/FURIA)
+- [Legacy](https://liquipedia.net/counterstrike/Legacy)
+- [MIBR](https://liquipedia.net/counterstrike/MIBR)
 
-`data-unix` is an absolute UTC timestamp in **milliseconds**. Never parse the
+The API terms are respected: an identifying `User-Agent`, gzip, and at most one
+parse request every 30 seconds (a run takes about a minute).
+
+`data-timestamp` is an absolute UTC timestamp in **seconds**. Never parse the
 visible localized date/time or add/subtract a fixed offset. Google receives ISO
 UTC instants with `CALENDAR_TIME_ZONE` (default `America/Campo_Grande`) for display.
 Example: `2026-09-09T06:00:00Z` is **02:00 in Campo Grande**, not 03:00.
 The calendar viewer may display the event in their own selected timezone.
 
-HLTV match-detail pages can be blocked independently of team pages. Production
-uses only the three team pages; **format, venue and streams are omitted when not
-confirmed**, rather than guessed. Event duration is an estimated two hours, not
-a guaranteed finish time. Each event links to its HLTV match page and has 60/15
-minute popup reminders. The detail parser remains for fixture cross-check tests,
-not as a production dependency.
+Liquipedia's upcoming list has no format, venue or streams, so **they are
+omitted** rather than guessed. Event duration is an estimated two hours, not
+a guaranteed finish time. Each event links to the Liquipedia tournament section
+and has 60/15 minute popup reminders.
 
 ## Safety and identity
 
 - All team pages must load and validate before any calendar write.
-- HLTV intermittently blocks datacenter requests (HTTP 403/429 or challenge HTML).
-  A blocked page is retried once after 60 seconds. If it is blocked again, the
+- A rate-limited or blocked page (HTTP 403/429 or API `ratelimited`) is retried
+  once after 60 seconds. If it is blocked again, the
   run is **skipped**: Calendar is not read or written, a `"status":"skipped"`
   line with the reason is logged, and the job exits 0 without a Slack alert.
   A block is never treated as an empty schedule. Consecutive blocked runs are
@@ -44,8 +47,13 @@ not as a production dependency.
   failure join the open work item. The Slack error says what failed and the work ID.
 - An explicit "No upcoming matches" section is a valid empty result.
 - Only future matches are synchronized; live and completed matches are omitted.
-- `hltv_<matchId>` identifies an event across rescheduling. A derby appears once,
-  while two matches between the same teams in one event remain separate.
+- `lp_<key>` identifies an event across rescheduling. The key hashes the
+  tournament section, stage and both teams. A derby appears once, while two
+  matches between the same teams in one event (different stages) remain separate.
+- When a key is new (source switch, or a TBD opponent that resolved), the one
+  managed event with the same teams within six hours is adopted **in place** and
+  rewritten with the new key. More than one candidate aborts before writes.
+  Existing `hltv_<matchId>` events were migrated this way.
 - Deterministic Google event IDs make retries idempotent, including an uncertain
   insert. Pagination is followed; unrelated calendar events are never modified.
 - Existing Draft5 FURIA events are adopted **in place** only when opponent and
@@ -65,7 +73,7 @@ not as a production dependency.
 ```sh
 bun install --frozen-lockfile
 bun test
-bun run sync --dry-run                 # live HLTV, no Calendar access
+bun run sync --dry-run                 # live Liquipedia, no Calendar access
 bun run sync --dry-run --check-calendar # read real Calendar and preview actions
 bun run test:live --check-calendar      # 3 read-only rounds, 30 seconds apart
 bun run sync                           # writes unless DRY_RUN=true

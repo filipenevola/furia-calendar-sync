@@ -1,4 +1,4 @@
-import { fetchMatches } from './retrieval/hltv.js';
+import { fetchMatches } from './retrieval/liquipedia.js';
 import { processMatches } from './processing.js';
 import { syncMatchesToCalendar } from './calendar.js';
 import { CALENDAR_TIME_ZONE } from './config.js';
@@ -9,7 +9,7 @@ export async function sync({ dryRun = false, checkCalendar = false, retrieve = f
     retrieved = await retrieve();
   } catch (error) {
     if (!error.blocked) throw error;
-    // HLTV blocks are intermittent. Keep the Calendar untouched and let the next run sync.
+    // Source rate limits/blocks are intermittent. Keep the Calendar untouched and let the next run sync.
     return { status: 'skipped', checkedAt: new Date().toISOString(), dryRun, reason: error.message, calendar: 'untouched' };
   }
   const matches = processMatches(retrieved.matches);

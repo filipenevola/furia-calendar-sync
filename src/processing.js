@@ -1,6 +1,6 @@
 export function getMatchUniqueKey(match) {
-  if (match.source !== 'hltv.org' || !/^\d+$/.test(match.matchId || '')) throw new Error('Missing HLTV match identity');
-  return `hltv_${match.matchId}`;
+  if (match.source === 'liquipedia.net' && /^[0-9a-f]{20}$/.test(match.matchId || '')) return `lp_${match.matchId}`;
+  throw new Error('Missing match identity');
 }
 
 export function processMatches(matches, now = new Date()) {

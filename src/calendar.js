@@ -24,7 +24,7 @@ export function matchToCalendarEvent(match, existingSummary) {
     end: { dateTime: new Date(+match.date + durationHours * 3600000).toISOString(), timeZone: CALENDAR_TIME_ZONE },
     reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 60 }, { method: 'popup', minutes: 15 }] },
     extendedProperties: { private: {
-      furiaSync: 'true', fixtureId: getMatchUniqueKey(match), source: 'hltv.org',
+      furiaSync: 'true', fixtureId: getMatchUniqueKey(match), source: match.source,
       teamIds: [match.teamId, match.opponentId].filter(Number.isInteger).sort((a, b) => a - b).join(','),
     } },
   };
@@ -64,8 +64,27 @@ export async function getExistingEvents(calendar, calendarId = GOOGLE_CALENDAR_I
 }
 
 const normalize = value => value.toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+const SIX_HOURS = 6 * 3600000;
+// Bracket placeholders (TBD, "A/B winner") can resolve to any team.
+const isPlaceholder = name => /^(?:tbd|tba)$|\/|\b(?:winner|loser)\b/i.test(name);
+// "-n 🎮 FURIA vs Legacy (MD3)" -> ['furia', 'legacy']; works for every source's titles.
+export function summaryTeams(summary) {
+  const title = String(summary || '').trimStart().replace(/^-n\s*/, '').replace(/^🎮\s*/, '').replace(/\s+\(MD\d\)$/, '');
+  const teams = title.split(' vs ');
+  return teams.length === 2 ? teams.map(t => t.trim()) : null;
+}
+function sameFixture(event, match) {
+  const teams = summaryTeams(event.summary);
+  if (!teams || Math.abs(Date.parse(event.start?.dateTime) - +match.date) > SIX_HOURS) return false;
+  const tracked = teams.findIndex(t => normalize(t) === normalize(match.team));
+  if (tracked < 0) return false;
+  const opponent = teams[1 - tracked];
+  return normalize(opponent) === normalize(match.opponent) || isPlaceholder(opponent) || isPlaceholder(match.opponent);
+}
+
 export function planCalendarSync(matches, existing) {
   const used = new Set();
+  const current = new Set(matches.map(getMatchUniqueKey));
   return matches.map(match => {
     const resource = matchToCalendarEvent(match);
     const fixtureId = getMatchUniqueKey(match);
@@ -79,6 +98,13 @@ export function planCalendarSync(matches, existing) {
       if (candidates.length > 1 || (!candidates.length && legacy.some(e => Date.parse(e.start?.dateTime) > Date.now()))) {
         throw new Error(`Ambiguous Draft5 migration for ${fixtureId}; review before writing`);
       }
+      migrated = candidates.length === 1;
+    }
+    if (!candidates.length) {
+      // A source switch or a resolved placeholder changes the key: adopt the one event
+      // for the same teams within six hours instead of creating a second copy.
+      candidates = existing.filter(e => !current.has(e.extendedProperties?.private?.fixtureId) && sameFixture(e, match));
+      if (candidates.length > 1) throw new Error(`Ambiguous calendar adoption for ${fixtureId}; review before writing`);
       migrated = candidates.length === 1;
     }
     resource.summary = preserveNoAlarmPrefix(resource.summary, candidates[0]?.summary);

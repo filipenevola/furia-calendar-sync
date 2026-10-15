@@ -1,4 +1,4 @@
-import { fetchMatches } from '../src/retrieval/hltv.js';
+import { fetchMatches } from '../src/retrieval/liquipedia.js';
 import { processMatches, getMatchUniqueKey } from '../src/processing.js';
 import { getCalendarClient, getExistingEvents, matchToCalendarEvent } from '../src/calendar.js';
 

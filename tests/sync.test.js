@@ -1,34 +1,30 @@
 import { test, expect } from 'bun:test';
-import { load } from 'cheerio';
 import { readFile } from 'node:fs/promises';
-import { TEAMS, BLOCK_RETRY_DELAY_MS, parseTeamPage, parseMatchPage, parseTimestamp, fetchHTML, fetchMatches } from '../src/retrieval/hltv.js';
+import { TEAMS, BLOCK_RETRY_DELAY_MS, PARSE_INTERVAL_MS, USER_AGENT, parseTeamPage, parseTimestamp, fixtureKey, fetchPage, fetchMatches } from '../src/retrieval/liquipedia.js';
 import { processMatches, getMatchUniqueKey } from '../src/processing.js';
-import { matchToCalendarEvent, parseCredentials, planCalendarSync, getExistingEvents, syncMatchesToCalendar } from '../src/calendar.js';
+import { matchToCalendarEvent, parseCredentials, planCalendarSync, getExistingEvents, syncMatchesToCalendar, summaryTeams } from '../src/calendar.js';
 import { decodeCalendarId } from '../src/config.js';
 import { sync } from '../src/sync.js';
-// paiN is no longer synced; its captured page still exercises the generic parser.
-const PAIN = { id: 4773, name: 'paiN', slug: 'pain' };
 const MIBR_TEAM = TEAMS.find(t => t.name === 'MIBR');
-const fixture = name => readFile(new URL(`fixtures/${name}.html`, import.meta.url), 'utf8');
+const fixture = async team => JSON.parse(await readFile(new URL(`fixtures/liquipedia-${team.page.toLowerCase()}.json`, import.meta.url), 'utf8'));
+const withText = (payload, edit) => ({ parse: { ...payload.parse, text: edit(payload.parse.text) } });
 const noSleep = async () => {};
 const now = new Date('2026-09-08T00:00:00Z');
-const example = { matchId: '2397604', source: 'hltv.org', date: new Date('2026-09-09T06:00:00Z'), team: 'MIBR', teamId: 9215, opponent: '9z', opponentId: 9996, competition: 'FISSURE Playground 3', format: 'MD3', url: 'https://www.hltv.org/matches/2397604/9z-vs-mibr-fissure-playground-3' };
+const example = { matchId: fixtureKey({ tournamentPath: '/counterstrike/FISSURE/Playground/3', stage: 'Group A', teams: ['MIBR', '9z'] }), source: 'liquipedia.net', date: new Date('2026-09-09T06:00:00Z'), team: 'MIBR', teamId: null, opponent: '9z', opponentId: null, competition: 'FISSURE Playground 3', format: 'MD3', url: 'https://liquipedia.net/counterstrike/FISSURE/Playground/3' };
+const KEY = getMatchUniqueKey(example);
 
-for (const team of TEAMS) {
-  test(`captured ${team.name} page and match detail agree on UTC, IDs, competition and BO`, async () => {
-    const rows = parseTeamPage(await fixture(team.slug), team);
-    expect(rows.length).toBe(1);
-    const match = parseMatchPage(await fixture(`match-${rows[0].matchId}`), rows[0]);
-    expect(match.team).toBe(team.name);
-    expect(match.date.getTime()).toBe(rows[0].date.getTime());
-    expect(match.competition.length).toBeGreaterThan(3);
-    expect(match.format).toBe('MD3');
-  });
-}
-
-test('timestamp is UTC milliseconds; never interpret human text or seconds', () => {
-  expect(parseTimestamp('1788933600000').toISOString()).toBe('2026-09-09T06:00:00.000Z');
-  for (const bad of ['', '1788933600', '09/09/2026', 'NaN', '-17889336000', '9999999999999']) expect(() => parseTimestamp(bad)).toThrow();
+test('captured team pages: UTC seconds, tournament, stage and one derby key', async () => {
+  const [furia, legacy] = await Promise.all(TEAMS.slice(0, 2).map(async t => parseTeamPage(await fixture(t), t)));
+  expect(furia).toEqual([{
+    matchId: legacy[0].matchId, url: 'https://liquipedia.net/counterstrike/Thunderpick/World_Championship/2026#Group_B',
+    competition: "Thunderpick World Champ. '26 - Group B - Winners Match", date: new Date('2026-10-15T16:00:00Z'), teams: ['FURIA', 'Legacy'],
+  }]);
+  const mibr = parseTeamPage(await fixture(MIBR_TEAM), MIBR_TEAM);
+  expect(mibr[0]).toMatchObject({ teams: ['MIBR', 'BC.Game'], competition: 'Stake Pulse Beat III - Group D - Opening Matches' });
+});
+test('timestamp is UTC seconds; never interpret human text or milliseconds', () => {
+  expect(parseTimestamp('1788933600').toISOString()).toBe('2026-09-09T06:00:00.000Z');
+  for (const bad of ['', '1788933600000', '09/09/2026', 'NaN', '-178893360', '9999999999']) expect(() => parseTimestamp(bad)).toThrow();
 });
 test('local display uses Campo Grande, not Sao Paulo or server timezone', () => {
   const event = matchToCalendarEvent(example);
@@ -38,95 +34,94 @@ test('local display uses Campo Grande, not Sao Paulo or server timezone', () => 
   const midnight = matchToCalendarEvent({ ...example, date: new Date('2026-09-09T02:30:00Z') });
   expect(midnight.description).toContain('08/09/2026, 22:30:00');
 });
-test('wrong team and challenge/missing layout fail closed', async () => {
-  expect(() => parseTeamPage('<title>Just a moment...</title>', TEAMS[0])).toThrow();
-  expect(() => parseTeamPage('', TEAMS[0])).toThrow();
-  expect(() => parseTeamPage(awaitedPain, TEAMS[0])).toThrow();
+test('wrong page, missing infobox or broken match fail closed', async () => {
+  const furia = await fixture(TEAMS[0]);
+  expect(() => parseTeamPage(furia, TEAMS[1])).toThrow('identity');
+  expect(() => parseTeamPage({}, TEAMS[0])).toThrow();
+  expect(() => parseTeamPage(withText(furia, t => t.replace('fo-nttax-infobox', 'changed')), TEAMS[0])).toThrow('layout');
+  expect(() => parseTeamPage(withText(furia, t => t.replace('1792080000', 'TBD')), TEAMS[0])).toThrow('timestamp');
+  expect(() => parseTeamPage(withText(furia, t => t.replace('class="carousel-item"', 'class="changed"')), TEAMS[0])).toThrow('Unrecognized');
+  expect(() => parseTeamPage(withText(furia, t => t.replace('match-info-tournament-name', 'changed')), TEAMS[0])).toThrow('tournament');
+  expect(() => parseTeamPage(withText(furia, t => t.replaceAll('>Legacy<', '><')), TEAMS[0])).toThrow('Invalid');
 });
-const awaitedPain = await fixture('pain');
-test('explicit empty is allowed; silent selector break is not', () => {
-  const prefix = '<div class="profile-team-name">FURIA</div><div id="matchesBox"><div class="headline-with-action"><h2>Upcoming matches for FURIA</h2></div>';
-  expect(parseTeamPage(prefix + '<div class="empty-state">No upcoming matches for FURIA, check back later.</div></div>', TEAMS[0])).toEqual([]);
-  expect(() => parseTeamPage(prefix + '</div>', TEAMS[0])).toThrow();
-});
-test('recent results are excluded even if they contain future timestamps', async () => {
-  const html = await fixture('pain');
-  const $ = load(html);
-  const duplicateTable = $('table').toString().replaceAll('2397731', '9999999');
-  $('#matchesBox').append('<h2>Recent results for paiN</h2>' + duplicateTable);
-  expect(parseTeamPage($.html(), PAIN)).toHaveLength(1);
-});
-test('malformed row fails rather than disappearing', async () => {
-  expect(() => parseTeamPage(awaitedPain.replace('1788994800000', 'TBD'), PAIN)).toThrow();
-});
-test('match details reject identity drift and skip explicitly postponed fixtures', async () => {
-  const ref = parseTeamPage(await fixture('mibr'), MIBR_TEAM)[0];
-  const html = await fixture(`match-${ref.matchId}`);
-  expect(() => parseMatchPage(html.replace('/team/9215/', '/team/1/'), ref)).toThrow();
-  expect(parseMatchPage(html.replace('Best of 3', 'Postponed. Best of 3'), ref)).toBeNull();
-  expect(() => parseMatchPage(html.replace(/class="time"/g, 'class="changed"'), ref)).toThrow();
+test('no upcoming section is an empty schedule; placeholders keep their label', async () => {
+  const furia = await fixture(TEAMS[0]);
+  expect(parseTeamPage(withText(furia, t => t.slice(0, t.indexOf('<div class="mw-heading')) + '</div>'), TEAMS[0])).toEqual([]);
+  expect(parseTeamPage(withText(furia, t => t.replaceAll('>Legacy<', '>TBD<')), TEAMS[0])[0].teams).toEqual(['FURIA', 'TBD']);
 });
 test('same match deduplicates but rematches in same competition remain separate', () => {
-  expect(processMatches([example, { ...example }, { ...example, matchId: '2397605' }], now)).toHaveLength(2);
+  expect(processMatches([example, { ...example }, { ...example, matchId: fixtureKey({ tournamentPath: 'x', stage: '', teams: ['MIBR', '9z'] }) }], now)).toHaveLength(2);
   expect(processMatches([{ ...example, date: now }], now)).toHaveLength(0);
   expect(() => processMatches([{ ...example, date: new Date('invalid') }], now)).toThrow();
   expect(getMatchUniqueKey(example)).toBe(getMatchUniqueKey({ ...example, date: new Date('2027-01-01') }));
+  expect(() => getMatchUniqueKey({ ...example, source: 'hltv.org' })).toThrow('identity');
   expect(() => processMatches([example, { ...example, date: new Date(+example.date + 60000) }], now)).toThrow();
 });
-test('derby uses canonical tracked side and one match id', async () => {
-  const ref = parseTeamPage(await fixture('mibr'), MIBR_TEAM)[0];
-  ref.teams = [{ id: 8297 }, { id: 9215 }];
-  const html = (await fixture(`match-${ref.matchId}`)).replaceAll('/team/9996/9z', '/team/8297/furia').replaceAll('>9z<', '>FURIA<');
-  const match = parseMatchPage(html, ref);
-  expect(match.team).toBe('FURIA'); expect(match.opponent).toBe('MIBR');
-  expect(processMatches([match, match], now)).toHaveLength(1);
+const fixturePages = async team => fixture(team);
+test('derby listed by both teams becomes one match on the canonical side', async () => {
+  const result = await fetchMatches({ now: new Date('2026-10-15T00:00:00Z'), sleep: noSleep, fetchTeam: fixturePages });
+  expect(result.coverage.map(c => c.team)).toEqual(['FURIA', 'Legacy', 'MIBR']);
+  expect(result.matches.map(m => `${m.team} vs ${m.opponent}`)).toEqual(['FURIA vs Legacy', 'MIBR vs BC.Game']);
+  expect(result.matches.every(m => m.source === 'liquipedia.net' && m.format === '')).toBe(true);
+});
+test('team pages respect the Liquipedia parse rate limit', async () => {
+  const sleeps = [];
+  await fetchMatches({ now, sleep: async ms => { sleeps.push(ms); }, fetchTeam: fixturePages });
+  expect(sleeps).toEqual([PARSE_INTERVAL_MS, PARSE_INTERVAL_MS]);
+  expect(PARSE_INTERVAL_MS).toBeGreaterThanOrEqual(30000);
 });
 test('one inaccessible team aborts retrieval before calendar writes', async () => {
   let writes = 0;
-  await expect(sync({ retrieve: () => fetchMatches({ now, sleep: noSleep, fetchPage: async url => {
-    if (url.includes('/8297/')) return fixture('furia');
-    throw new Error('HLTV HTTP 403');
-  } }), writeCalendar: async () => { writes++; } })).rejects.toThrow('403');
+  await expect(sync({ retrieve: () => fetchMatches({ now, sleep: noSleep, fetchTeam: async team => {
+    if (team.name === 'FURIA') return fixture(team);
+    throw new Error('Liquipedia HTTP 404: Legacy');
+  } }), writeCalendar: async () => { writes++; } })).rejects.toThrow('404');
   expect(writes).toBe(0);
 });
-test('paiN is no longer synced', () => {
+test('paiN is not synced', () => {
   expect(TEAMS.map(t => t.name)).toEqual(['FURIA', 'Legacy', 'MIBR']);
 });
 test('a blocked team page is retried once after a pause and the run continues', async () => {
   const sleeps = []; const calls = {};
-  const result = await fetchMatches({ now, sleep: async ms => { sleeps.push(ms); }, fetchPage: async url => {
-    const team = TEAMS.find(t => url.endsWith(`/${t.id}/${t.slug}`));
-    calls[team.slug] = (calls[team.slug] || 0) + 1;
-    if (team.slug === 'legacy' && calls.legacy === 1) throw Object.assign(new Error('HLTV HTTP 403'), { blocked: true });
-    return fixture(team.slug);
+  const result = await fetchMatches({ now, sleep: async ms => { sleeps.push(ms); }, fetchTeam: async team => {
+    calls[team.name] = (calls[team.name] || 0) + 1;
+    if (team.name === 'Legacy' && calls.Legacy === 1) throw Object.assign(new Error('Liquipedia HTTP 429: Legacy'), { blocked: true });
+    return fixture(team);
   } });
-  expect(calls).toEqual({ furia: 1, legacy: 2, mibr: 1 });
+  expect(calls).toEqual({ FURIA: 1, Legacy: 2, MIBR: 1 });
   expect(sleeps).toContain(BLOCK_RETRY_DELAY_MS);
-  expect(result.blocks).toEqual([{ team: 'Legacy', message: 'HLTV HTTP 403' }]);
+  expect(result.blocks).toEqual([{ team: 'Legacy', message: 'Liquipedia HTTP 429: Legacy' }]);
 });
 test('a persistent block skips the run without touching the Calendar', async () => {
   let writes = 0; let fetches = 0;
-  const result = await sync({ retrieve: () => fetchMatches({ now, sleep: noSleep, fetchPage: async url => {
+  const result = await sync({ retrieve: () => fetchMatches({ now, sleep: noSleep, fetchTeam: async team => {
     fetches++;
-    if (url.includes('/8297/')) return fixture('furia');
-    return '<title>Just a moment...</title>';
+    if (team.name === 'FURIA') return fixture(team);
+    throw Object.assign(new Error('Liquipedia HTTP 429: Legacy'), { blocked: true });
   } }), writeCalendar: async () => { writes++; } });
   expect(result).toMatchObject({ status: 'skipped', calendar: 'untouched' });
-  expect(result.reason).toContain('access challenge');
+  expect(result.reason).toContain('429');
   expect(fetches).toBe(3);
   expect(writes).toBe(0);
 });
-test('HTTP errors: bounded transient retry; no retry of access block or rate limit', async () => {
-  let calls = 0;
-  expect(await fetchHTML('https://www.hltv.org', { sleep: noSleep, fetchImpl: async () => { calls++; return new Response(calls < 3 ? '' : 'ok', { status: calls < 3 ? 503 : 200 }); } })).toBe('ok');
+test('HTTP errors: identifying User-Agent, bounded transient retry, no retry of a rate limit', async () => {
+  let calls = 0; let headers;
+  const ok = new Response(JSON.stringify({ parse: { title: 'FURIA' } }));
+  expect(await fetchPage(TEAMS[0], { sleep: noSleep, fetchImpl: async (url, init) => { calls++; headers = init.headers; return calls < 3 ? new Response('', { status: 503 }) : ok; } })).toEqual({ parse: { title: 'FURIA' } });
   expect(calls).toBe(3);
+  expect(headers['User-Agent']).toBe(USER_AGENT);
   for (const status of [403, 429]) {
     calls = 0;
-    const error = await fetchHTML('https://www.hltv.org', { sleep: noSleep, fetchImpl: async () => { calls++; return new Response('', { status }); } }).catch(e => e);
+    const error = await fetchPage(TEAMS[0], { sleep: noSleep, fetchImpl: async () => { calls++; return new Response('', { status }); } }).catch(e => e);
     expect(error.message).toContain(String(status));
     expect(error.blocked).toBe(true);
     expect(calls).toBe(1);
   }
+  calls = 0;
+  const limited = await fetchPage(TEAMS[0], { sleep: noSleep, fetchImpl: async () => { calls++; return new Response(JSON.stringify({ error: { code: 'ratelimited' } })); } }).catch(e => e);
+  expect(limited.blocked).toBe(true); expect(calls).toBe(1);
+  const missing = await fetchPage(TEAMS[0], { sleep: noSleep, fetchImpl: async () => new Response(JSON.stringify({ error: { code: 'missingtitle' } })) }).catch(e => e);
+  expect(missing.message).toContain('missingtitle'); expect(missing.blocked).toBeUndefined();
 });
 test('calendar ID accepts raw email and unpadded base64 without corrupting either', () => {
   expect(decodeCalendarId('test@example.com')).toBe('test@example.com');
@@ -137,22 +132,22 @@ test('invalid credentials errors do not leak input', () => {
   expect(() => parseCredentials('private-secret-value')).toThrow('must be service-account JSON');
   expect(() => parseCredentials(null)).toThrow('required');
 });
-const managed = (fixtureId, id = 'old', date = example.date.toISOString()) => ({ id, start: { dateTime: date }, extendedProperties: { private: { furiaSync: 'true', fixtureId } } });
+const managed = (fixtureId, id = 'old', date = example.date.toISOString(), summary) => ({ id, summary, start: { dateTime: date }, extendedProperties: { private: { furiaSync: 'true', fixtureId } } });
 test('adopts legacy FURIA event in place and rejects ambiguous migration', () => {
   const match = { ...example, team: 'FURIA', teamId: 8297 };
   const old = managed('furia_vs_9z_old_competition');
   expect(planCalendarSync([match], [old])[0]).toMatchObject({ action: 'update', eventId: 'old', migrated: true });
   expect(() => planCalendarSync([match], [old, { ...old, id: 'other' }])).toThrow('Ambiguous');
-  expect(() => planCalendarSync([match, { ...match, matchId: '2' }], [old])).toThrow('Two matches');
+  expect(() => planCalendarSync([match, { ...match, matchId: fixtureKey({ tournamentPath: 'x', stage: '', teams: ['FURIA', '9z'] }) }], [old])).toThrow('Two matches');
   expect(planCalendarSync([example], [old])[0].action).toBe('create');
 });
-test('HLTV event rescheduling is an update and repeated managed IDs fail', () => {
-  expect(planCalendarSync([example], [managed('hltv_2397604')])[0].action).toBe('update');
-  expect(() => planCalendarSync([example], [managed('hltv_2397604'), managed('hltv_2397604', 'other')])).toThrow('Duplicate');
+test('event rescheduling is an update and repeated managed IDs fail', () => {
+  expect(planCalendarSync([example], [managed(KEY)])[0].action).toBe('update');
+  expect(() => planCalendarSync([example], [managed(KEY), managed(KEY, 'other')])).toThrow('Duplicate');
 });
 test('reads every calendar page and ignores unrelated events', async () => {
   const calls = [];
-  const calendar = { events: { list: async args => { calls.push(args); return { data: args.pageToken ? { items: [managed('hltv_2', 'second')] } : { items: [managed('hltv_1'), { id: 'unrelated' }], nextPageToken: 'page2' } }; } } };
+  const calendar = { events: { list: async args => { calls.push(args); return { data: args.pageToken ? { items: [managed('lp_2', 'second')] } : { items: [managed('lp_1'), { id: 'unrelated' }], nextPageToken: 'page2' } }; } } };
   expect(await getExistingEvents(calendar, 'test')).toHaveLength(2);
   expect(calls[1].pageToken).toBe('page2');
   expect(calls[0].privateExtendedProperty).toEqual(['furiaSync=true']);
@@ -174,7 +169,7 @@ test('insert 409 recovers known managed event; unrelated collision and write err
   let patches = 0;
   const calendar = { events: {
     list: async () => ({ data: {} }), insert: async () => { throw { code: 409 }; },
-    get: async () => ({ data: managed('hltv_2397604') }), patch: async () => { patches++; },
+    get: async () => ({ data: managed(KEY) }), patch: async () => { patches++; },
   } };
   await syncMatchesToCalendar([example], { calendar }); expect(patches).toBe(1);
   calendar.events.get = async () => ({ data: { id: 'unrelated' } });
@@ -189,69 +184,10 @@ test('source-only dry run never touches calendar and write failures propagate', 
   await expect(sync({ retrieve, writeCalendar })).rejects.toThrow('write failure');
 });
 
- test('live retrieval relies on all four team pages, not optional detail endpoints', async () => {
-   const urls = [];
-   const result = await fetchMatches({ now, sleep: noSleep, fetchPage: async url => {
-     urls.push(url);
-     const team = TEAMS.find(t => url.endsWith(`/${t.id}/${t.slug}`));
-     if (!team) throw new Error('Detail endpoint must not be fetched');
-     return fixture(team.slug);
-   } });
-   expect(urls).toHaveLength(3);
-   expect(result.coverage.map(c => c.team)).toEqual(['FURIA', 'Legacy', 'MIBR']);
-   expect(result.matches).toHaveLength(3);
-   expect(result.matches.every(m => m.competition.length > 3 && m.format === '')).toBe(true);
- });
-
-test('captured bracket placeholders have labels, not fabricated opponent IDs', async () => {
-  for (const [team, label] of [[TEAMS[1], 'PARIVISION/FURIA winner'], [MIBR_TEAM, 'Astralis/BETBOOM winner']]) {
-    const rows = parseTeamPage(await fixture(team.slug + '-pending'), team);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].teams).toEqual([{ id: team.id, name: team.name }, { id: null, name: label }]);
-    expect(rows[0].date.toISOString()).toBe('2026-09-10T09:00:00.000Z');
-  }
-});
-test('unknown or broken linked opponents still fail closed', async () => {
-  const html = await fixture('legacy-pending');
-  expect(() => parseTeamPage(html.replaceAll('PARIVISION/FURIA winner', 'unrecognized'), TEAMS[1])).toThrow('Invalid HLTV team');
-  expect(() => parseTeamPage(html.replace('<span class="team-name team-2">', '<a href="/broken" class="team-name team-2">'), TEAMS[1])).toThrow();
-  for (const label of ['TBD', 'TBA', 'PARIVISION/FURIA loser']) {
-    expect(parseTeamPage(html.replaceAll('PARIVISION/FURIA winner', label), TEAMS[1])[0].teams[1]).toEqual({ id: null, name: label });
-  }
-});
-test('pending opponents do not block FURIA rescheduling; resolution updates the same event', async () => {
-  const retrieved = await fetchMatches({ now, sleep: noSleep, fetchPage: async url => {
-    const team = TEAMS.find(t => url.endsWith('/' + t.id + '/' + t.slug));
-    return fixture(team.slug + ([12468, 9215].includes(team.id) ? '-pending' : ''));
-  } });
-  expect(retrieved.matches).toHaveLength(3);
-  const pending = retrieved.matches.find(m => m.team === 'Legacy');
-  const resource = matchToCalendarEvent(pending);
-  expect(resource.summary).toBe('🎮 Legacy vs PARIVISION/FURIA winner');
-  expect(resource.extendedProperties.private.teamIds).toBe('12468');
-  const items = []; let inserts = 0; let patches = 0;
-  const calendar = { events: {
-    list: async () => ({ data: { items } }),
-    insert: async ({ resource }) => { inserts++; items.push(resource); },
-    patch: async ({ eventId, resource }) => { patches++; items[items.findIndex(e => e.id === eventId)] = { id: eventId, ...resource }; },
-  } };
-  await syncMatchesToCalendar(retrieved.matches, { calendar });
-  const furia = retrieved.matches.find(m => m.team === 'FURIA');
-  const moved = { ...furia, date: new Date(+furia.date + 55 * 60000) };
-  await syncMatchesToCalendar([moved, { ...pending, opponent: 'FURIA', opponentId: 8297 }], { calendar });
-  expect(inserts).toBe(3); expect(patches).toBe(2); expect(items).toHaveLength(3);
-  expect(items.find(e => e.extendedProperties.private.fixtureId === getMatchUniqueKey(furia)).start.dateTime).toBe(moved.date.toISOString());
-  expect(items.find(e => e.extendedProperties.private.fixtureId === getMatchUniqueKey(pending)).summary).toBe('🎮 Legacy vs FURIA');
-});
-test('conflicting pending opponent labels are not silently deduplicated', () => {
-  const pending = { ...example, opponentId: null, opponent: 'A/B winner' };
-  expect(() => processMatches([pending, { ...pending, opponent: 'C/D winner' }], now)).toThrow('Conflicting');
-});
-
 test('preserves Pager -n prefix while regenerating title and updating all other fields', () => {
   const changed = { ...example, opponent: 'FURIA', opponentId: 8297, date: new Date(+example.date + 55 * 60000) };
   for (const title of ['-n Old opponent', '  -n Old opponent', '-n', '-nOld opponent']) {
-    const old = { ...managed('hltv_2397604'), summary: title };
+    const old = { ...managed(KEY), summary: title };
     const entry = planCalendarSync([changed], [old])[0];
     expect(entry.resource).toEqual({ ...matchToCalendarEvent(changed), summary: '-n 🎮 MIBR vs FURIA (MD3)' });
     expect(entry.eventId).toBe('old');
@@ -259,7 +195,7 @@ test('preserves Pager -n prefix while regenerating title and updating all other 
 });
 test('does not invent -n for new events or titles without the leading marker', () => {
   for (const title of [undefined, '', 'Old -n opponent', '🎮 MIBR vs 9z']) {
-    expect(planCalendarSync([example], [{ ...managed('hltv_2397604'), summary: title }])[0].resource.summary)
+    expect(planCalendarSync([example], [{ ...managed(KEY), summary: title }])[0].resource.summary)
       .toBe('🎮 MIBR vs 9z (MD3)');
   }
   expect(planCalendarSync([example], [])[0].resource.summary).toBe('🎮 MIBR vs 9z (MD3)');
@@ -272,7 +208,7 @@ test('legacy adoption also preserves the no-alarm prefix', () => {
   });
 });
 test('dry-run and repeat writes retain one -n; user removal is respected', async () => {
-  let item = { ...managed('hltv_2397604'), summary: '-n Old title' };
+  let item = { ...managed(KEY), summary: '-n Old title' };
   let patches = 0;
   const calendar = { events: {
     list: async () => ({ data: { items: [item] } }),
@@ -293,7 +229,7 @@ test('insert conflict recovery preserves the prefix on the existing remote event
   const calendar = { events: {
     list: async () => ({ data: { items: [] } }),
     insert: async () => { throw { code: 409 }; },
-    get: async () => ({ data: { ...managed('hltv_2397604'), summary: '-n Old title' } }),
+    get: async () => ({ data: { ...managed(KEY), summary: '-n Old title' } }),
     patch: async ({ resource }) => { written = resource; },
   } };
   const result = await syncMatchesToCalendar([example], { calendar });
@@ -304,4 +240,33 @@ test('insert conflict recovery preserves the prefix on the existing remote event
 test('calendar verifier expected title recognizes preserved -n', () => {
   expect(matchToCalendarEvent(example, '-n old').summary).toBe('-n 🎮 MIBR vs 9z (MD3)');
   expect(matchToCalendarEvent(example).summary).toBe('🎮 MIBR vs 9z (MD3)');
+});
+
+test('existing HLTV events are adopted in place, never duplicated', () => {
+  const hltv = (summary, date = example.date.toISOString(), id = 'hltv-event') => managed('hltv_2399386', id, date, summary);
+  for (const title of ['🎮 MIBR vs 9z', '-n 🎮 9Z vs MIBR (MD3)', '🎮 MIBR vs FURIA/9z winner', '🎮 MIBR vs TBD']) {
+    expect(planCalendarSync([example], [hltv(title)])[0]).toMatchObject({ action: 'update', eventId: 'hltv-event', migrated: true });
+  }
+  expect(planCalendarSync([example], [hltv('-n 🎮 MIBR vs 9z')])[0].resource.summary).toBe('-n 🎮 MIBR vs 9z (MD3)');
+  expect(planCalendarSync([{ ...example, opponent: 'TBD' }], [hltv('🎮 MIBR vs 9z')])[0].action).toBe('update');
+  // Different opponent, other tracked team, or more than six hours away is a different match.
+  expect(planCalendarSync([example], [hltv('🎮 MIBR vs MOUZ')])[0].action).toBe('create');
+  expect(planCalendarSync([example], [hltv('🎮 FURIA vs 9z')])[0].action).toBe('create');
+  expect(planCalendarSync([example], [hltv('🎮 MIBR vs 9z', new Date(+example.date + 7 * 3600000).toISOString())])[0].action).toBe('create');
+  expect(() => planCalendarSync([example], [hltv('🎮 MIBR vs 9z'), hltv('🎮 MIBR vs TBD', undefined, 'other')])).toThrow('Ambiguous');
+  // An event already owned by a current fixture is never taken by another match.
+  const other = { ...example, matchId: fixtureKey({ tournamentPath: 'y', stage: '', teams: ['MIBR', '9z'] }) };
+  expect(planCalendarSync([example, other], [managed(KEY, 'owned', undefined, '🎮 MIBR vs 9z')]).map(p => p.action)).toEqual(['update', 'create']);
+  expect(summaryTeams('Lunch')).toBeNull();
+});
+test('adopted HLTV event is rewritten with the Liquipedia key; the next run is an exact update', async () => {
+  const items = [managed('hltv_2399386', 'hltv-event', undefined, '🎮 MIBR vs 9z')]; let inserts = 0;
+  const calendar = { events: {
+    list: async () => ({ data: { items } }), insert: async () => { inserts++; },
+    patch: async ({ eventId, resource }) => { items[items.findIndex(e => e.id === eventId)] = { id: eventId, ...resource }; },
+  } };
+  expect((await syncMatchesToCalendar([example], { calendar })).migrated).toBe(1);
+  expect(items[0].extendedProperties.private).toMatchObject({ fixtureId: KEY, source: 'liquipedia.net' });
+  expect((await syncMatchesToCalendar([example], { calendar })).migrated).toBe(0);
+  expect(inserts).toBe(0); expect(items).toHaveLength(1);
 });

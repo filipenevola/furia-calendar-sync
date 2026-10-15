@@ -22,11 +22,11 @@ async function trackStreak(record) {
 try {
   const result = await sync({ dryRun, checkCalendar: args.includes('--check-calendar') });
   if (result.status === 'skipped') {
-    // Expected HLTV block: exit 0. Slack hears about it only every NOTIFY_EVERY consecutive blocked runs.
+    // Expected source block: exit 0. Slack hears about it only every NOTIFY_EVERY consecutive blocked runs.
     const streak = await trackStreak(recordBlockedRun);
     console.warn(JSON.stringify({ ...result, blockStreak: streak?.streak, message: `Calendar sync skipped: ${result.reason}` }));
     if (streak?.notify) {
-      await logger.warn(`HLTV has blocked ${streak.streak} sync runs in a row (about ${streak.streak / 2}h without a Calendar update). ` +
+      await logger.warn(`The match source has blocked ${streak.streak} sync runs in a row (about ${streak.streak / 2}h without a Calendar update). ` +
         `Calendar is untouched and each run keeps retrying; next notice after ${NOTIFY_EVERY} more blocked runs. Latest: ${result.reason}`);
     }
   } else {

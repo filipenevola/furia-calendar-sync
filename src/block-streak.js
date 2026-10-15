@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-// The Job has no volume, so the count of consecutive HLTV-blocked runs lives in
+// The Job has no volume, so the count of consecutive source-blocked runs lives in
 // one private event on the service account's own calendar, never on the shared one.
 const STATE_CALENDAR_ID = 'primary';
 export const STATE_EVENT_ID = createHash('sha256').update('br-cs-calendar-sync:block-streak').digest('hex');

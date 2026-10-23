@@ -69,6 +69,25 @@ export function parseTeamPage(payload, team) {
   });
 }
 
+// Team pages are cached renders of match data and can lag a reschedule (2026-10-23:
+// FURIA still showed the old FURIA vs Legacy time, Legacy and the tournament the new
+// one). The tournament page owns the match, so it settles which listed time is current.
+export function resolveFromTournament(payload, pagePath, candidates) {
+  const page = payload?.parse;
+  if (!page || page.title !== pagePath.replace(/_/g, ' ') || typeof page.text !== 'string') {
+    throw new Error(`Liquipedia page identity mismatch for ${pagePath}`);
+  }
+  const $ = load(page.text);
+  const teams = candidates[0].teams.map(t => t.toLowerCase()).sort().join('|');
+  const listed = new Set($('.match-info').toArray().filter(el => {
+    const names = $(el).find('.match-info-opponent-row .name').toArray().map(n => clean($(n).text()).toLowerCase());
+    return names.length === 2 && names.sort().join('|') === teams;
+  }).map(el => $(el).find('.match-info-countdown .timer-object[data-timestamp]').first().attr('data-timestamp')));
+  const confirmed = candidates.filter(c => listed.has(String(c.date.getTime() / 1000)));
+  if (confirmed.length !== 1) throw new Error(`Conflicting Liquipedia team pages for ${candidates[0].matchId}; tournament page did not settle it`);
+  return confirmed[0];
+}
+
 export async function fetchPage(team, { fetchImpl = fetch, sleep = ms => new Promise(r => setTimeout(r, ms)) } = {}) {
   const url = `${API}?action=parse&page=${encodeURIComponent(team.page)}&prop=text&format=json&formatversion=2`;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -101,6 +120,7 @@ export async function fetchPage(team, { fetchImpl = fetch, sleep = ms => new Pro
 
 export async function fetchMatches({ fetchTeam = fetchPage, sleep = ms => new Promise(r => setTimeout(r, ms)), now = new Date() } = {}) {
   const references = new Map();
+  const conflicts = new Map();
   const coverage = [];
   const blocks = [];
   // Every team page must succeed before any calendar access/writes.
@@ -121,10 +141,17 @@ export async function fetchMatches({ fetchTeam = fetchPage, sleep = ms => new Pr
     for (const row of rows) {
       const previous = references.get(row.matchId);
       if (previous && previous.date.getTime() !== row.date.getTime()) {
-        throw new Error(`Conflicting Liquipedia team pages for ${row.matchId}; retry next run`);
+        conflicts.set(row.matchId, [previous, row]);
+        continue;
       }
       references.set(row.matchId, row);
     }
+  }
+  for (const [matchId, candidates] of conflicts) {
+    await sleep(PARSE_INTERVAL_MS);
+    const path = new URL(candidates[0].url).pathname.replace('/counterstrike/', '');
+    const page = decodeURIComponent(path);
+    references.set(matchId, resolveFromTournament(await fetchTeam({ name: page, page }), page, candidates));
   }
   return { matches: [...references.values()].map(referenceToMatch), coverage, blocks };
 }

@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
 import { readFile } from 'node:fs/promises';
-import { TEAMS, BLOCK_RETRY_DELAY_MS, PARSE_INTERVAL_MS, USER_AGENT, parseTeamPage, parseTimestamp, fixtureKey, fetchPage, fetchMatches } from '../src/retrieval/liquipedia.js';
+import { TEAMS, BLOCK_RETRY_DELAY_MS, PARSE_INTERVAL_MS, USER_AGENT, parseTeamPage, parseTimestamp, fixtureKey, fetchPage, fetchMatches, resolveFromTournament } from '../src/retrieval/liquipedia.js';
 import { processMatches, getMatchUniqueKey } from '../src/processing.js';
 import { matchToCalendarEvent, parseCredentials, planCalendarSync, getExistingEvents, syncMatchesToCalendar, summaryTeams } from '../src/calendar.js';
 import { decodeCalendarId } from '../src/config.js';
@@ -63,6 +63,43 @@ test('derby listed by both teams becomes one match on the canonical side', async
   expect(result.coverage.map(c => c.team)).toEqual(['FURIA', 'Legacy', 'MIBR']);
   expect(result.matches.map(m => `${m.team} vs ${m.opponent}`)).toEqual(['FURIA vs Legacy', 'MIBR vs BC.Game']);
   expect(result.matches.every(m => m.source === 'liquipedia.net' && m.format === '')).toBe(true);
+});
+const BLAST = 'BLAST/Rivals/2026/Fall';
+const blastPage = async () => JSON.parse(await readFile(new URL('fixtures/liquipedia-blast-rivals-2026-fall.json', import.meta.url), 'utf8'));
+// 2026-10-23: the cached FURIA page kept the old derby time; Legacy and the tournament had the new one.
+const staleDerbyPages = (furiaTimestamp = '1794362400') => async team => {
+  if (team.page === BLAST) return blastPage();
+  const page = await fixture(team);
+  const ts = team.name === 'FURIA' ? furiaTimestamp : '1794366000';
+  return withText(page, t => t.replace('Thunderpick/World_Championship/2026#Group_B', `${BLAST}#Group_A`).replace('1792080000', ts));
+};
+test('derby times that disagree between team pages are settled by the tournament page', async () => {
+  const requested = [];
+  const sleeps = [];
+  const fetchTeam = staleDerbyPages();
+  const result = await fetchMatches({ now, sleep: async ms => { sleeps.push(ms); }, fetchTeam: async team => { requested.push(team.page); return fetchTeam(team); } });
+  expect(requested).toEqual(['FURIA', 'Legacy', 'MIBR', BLAST]);
+  expect(sleeps).toEqual([PARSE_INTERVAL_MS, PARSE_INTERVAL_MS, PARSE_INTERVAL_MS]);
+  const derby = result.matches.find(m => m.opponent === 'Legacy');
+  expect(derby).toMatchObject({ team: 'FURIA', date: new Date('2026-11-11T03:00:00Z'), url: `https://liquipedia.net/counterstrike/${BLAST}#Group_A` });
+  expect(result.matches).toHaveLength(2);
+});
+test('agreeing team pages never fetch the tournament page', async () => {
+  const requested = [];
+  const fetchTeam = staleDerbyPages('1794366000');
+  await fetchMatches({ now, sleep: noSleep, fetchTeam: async team => { requested.push(team.page); return fetchTeam(team); } });
+  expect(requested).toEqual(['FURIA', 'Legacy', 'MIBR']);
+});
+test('a tournament page that confirms neither or both times still fails closed', async () => {
+  const blast = await blastPage();
+  const candidates = ['1794362400', '1794366000'].map(ts => ({ matchId: 'x', teams: ['FURIA', 'Legacy'], date: parseTimestamp(ts) }));
+  expect(resolveFromTournament(blast, BLAST, candidates).date.toISOString()).toBe('2026-11-11T03:00:00.000Z');
+  expect(() => resolveFromTournament(blast, BLAST, candidates.map(c => ({ ...c, teams: ['FURIA', 'MIBR'] })))).toThrow('did not settle');
+  expect(() => resolveFromTournament(withText(blast, t => t.replace('1794366000', '1794370000')), BLAST, candidates)).toThrow('did not settle');
+  const both = withText(blast, t => t + t.replace('1794366000', '1794362400'));
+  expect(() => resolveFromTournament(both, BLAST, candidates)).toThrow('did not settle');
+  expect(() => resolveFromTournament(blast, 'Other/Page', candidates)).toThrow('identity');
+  await expect(sync({ retrieve: () => fetchMatches({ now, sleep: noSleep, fetchTeam: async team => team.page === BLAST ? withText(blast, t => t.replaceAll('1794366000', '1794370000')) : staleDerbyPages()(team) }) })).rejects.toThrow('Conflicting');
 });
 test('team pages respect the Liquipedia parse rate limit', async () => {
   const sleeps = [];

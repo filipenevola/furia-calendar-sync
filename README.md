@@ -40,8 +40,12 @@ and has 60/15 minute popup reminders.
   successful sync resets the count. The counter is a private event in the service
   account's **own** calendar (not the shared one), since the Job has no volume. See
   [the 2026-10-13 incident](docs/hltv-403-incident.md).
+- When a derby's two team pages list different times (one page is a stale cached
+  render), the tournament page settles it: the one listed time it confirms wins,
+  after one more rate-limited request. See
+  [the 2026-10-23 incident](docs/liquipedia-stale-team-page-incident.md).
 - Malformed timestamps, missing sections, other HTTP errors and conflicting data
-  fail the run (exit 1); they are not successful empty schedules. Real failures
+  the tournament page does not settle fail the run (exit 1); they are not successful empty schedules. Real failures
   are sent to **Filipe Nevola Factory** (the Warren work controller, `POST /work`),
   which investigates and opens a fix PR or asks on GitHub. Repeats of the same
   failure join the open work item. The Slack error says what failed and the work ID.

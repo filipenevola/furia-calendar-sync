@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
 import { readFile } from 'node:fs/promises';
-import { TEAMS, BLOCK_RETRY_DELAY_MS, PARSE_INTERVAL_MS, USER_AGENT, parseTeamPage, parseTimestamp, fixtureKey, fetchPage, fetchMatches } from '../src/retrieval/liquipedia.js';
+import { TEAMS, BLOCK_RETRY_DELAY_MS, PARSE_INTERVAL_MS, USER_AGENT, parseTeamPage, parseTimestamp, fixtureKey, fetchPage, fetchMatches, SourceConflictError } from '../src/retrieval/liquipedia.js';
 import { processMatches, getMatchUniqueKey } from '../src/processing.js';
 import { matchToCalendarEvent, parseCredentials, planCalendarSync, getExistingEvents, syncMatchesToCalendar, summaryTeams } from '../src/calendar.js';
 import { decodeCalendarId } from '../src/config.js';
@@ -91,6 +91,23 @@ test('a blocked team page is retried once after a pause and the run continues', 
   expect(calls).toEqual({ FURIA: 1, Legacy: 2, MIBR: 1 });
   expect(sleeps).toContain(BLOCK_RETRY_DELAY_MS);
   expect(result.blocks).toEqual([{ team: 'Legacy', message: 'Liquipedia HTTP 429: Legacy' }]);
+});
+test('conflicting team pages skip the run without touching the Calendar', async () => {
+  const pages = await Promise.all(TEAMS.slice(0, 2).map(fixture));
+  const conflict = { parse: { ...pages[1].parse, text: pages[1].parse.text.replace('1792080000', '1792083600') } };
+  let writes = 0;
+  const retrieve = () => fetchMatches({ now: new Date('2026-10-15T00:00:00Z'), sleep: noSleep, fetchTeam: async team => {
+    if (team.name === 'FURIA') return pages[0];
+    if (team.name === 'Legacy') return conflict;
+    return fixture(team);
+  } });
+  const error = await retrieve().catch(e => e);
+  expect(error).toBeInstanceOf(SourceConflictError);
+  expect(error.conflict).toBe(true);
+  const result = await sync({ retrieve, writeCalendar: async () => { writes++; } });
+  expect(result).toMatchObject({ status: 'skipped', conflict: true, calendar: 'untouched' });
+  expect(result.reason).toContain('Conflicting Liquipedia team pages');
+  expect(writes).toBe(0);
 });
 test('a persistent block skips the run without touching the Calendar', async () => {
   let writes = 0; let fetches = 0;

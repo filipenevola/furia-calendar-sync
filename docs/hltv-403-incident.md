@@ -29,8 +29,9 @@ All timestamps below are UTC unless explicitly localized.
   The block is logged as a `"status":"warning"` line and reported in `blocks`.
 - If HLTV blocks again, `sync` returns `"status":"skipped"` with the reason, without
   reading or writing the Calendar. `job.js` logs that line and exits 0 with no Slack alert.
-- Every other failure (parser/layout drift, 5xx after retries, Calendar errors,
-  conflicting data) still exits 1 and alerts.
+- Every other failure (parser/layout drift, 5xx after retries, Calendar errors)
+  still exits 1 and alerts. Conflicting team-page snapshots now use the same
+  Calendar-untouched skip, without changing the block streak.
 - Known gap: the Job has no persistent state, so a block that lasts for hours
   shows up only as consecutive `skipped` runs in the logs, without an alert.
 

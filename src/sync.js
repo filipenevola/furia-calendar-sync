@@ -8,9 +8,13 @@ export async function sync({ dryRun = false, checkCalendar = false, retrieve = f
   try {
     retrieved = await retrieve();
   } catch (error) {
-    if (!error.blocked) throw error;
-    // Source rate limits/blocks are intermittent. Keep the Calendar untouched and let the next run sync.
-    return { status: 'skipped', checkedAt: new Date().toISOString(), dryRun, reason: error.message, calendar: 'untouched' };
+    if (!error.blocked && !error.conflict) throw error;
+    // Source rate limits/blocks and conflicting snapshots are intermittent. Keep the
+    // Calendar untouched and let the next run read a consistent snapshot.
+    return {
+      status: 'skipped', checkedAt: new Date().toISOString(), dryRun, reason: error.message,
+      calendar: 'untouched', ...(error.conflict ? { conflict: true } : {}),
+    };
   }
   const matches = processMatches(retrieved.matches);
   const result = {

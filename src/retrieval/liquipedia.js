@@ -26,6 +26,16 @@ export class SourceBlockedError extends Error {
   }
 }
 
+// Both team pages are authoritative, so a disagreement cannot be resolved in code.
+// Leave the Calendar untouched and let a later run read a consistent snapshot.
+export class SourceConflictError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'SourceConflictError';
+    this.conflict = true;
+  }
+}
+
 export function parseTimestamp(value) {
   // Liquipedia data-timestamp is UTC seconds, NOT the displayed CEST text.
   if (!/^\d{10}$/.test(value || '') || +value < 946684800 || +value > 4102444800) {
@@ -121,7 +131,7 @@ export async function fetchMatches({ fetchTeam = fetchPage, sleep = ms => new Pr
     for (const row of rows) {
       const previous = references.get(row.matchId);
       if (previous && previous.date.getTime() !== row.date.getTime()) {
-        throw new Error(`Conflicting Liquipedia team pages for ${row.matchId}; retry next run`);
+        throw new SourceConflictError(`Conflicting Liquipedia team pages for ${row.matchId}; retry next run`);
       }
       references.set(row.matchId, row);
     }

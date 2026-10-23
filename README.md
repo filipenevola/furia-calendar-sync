@@ -40,8 +40,11 @@ and has 60/15 minute popup reminders.
   successful sync resets the count. The counter is a private event in the service
   account's **own** calendar (not the shared one), since the Job has no volume. See
   [the 2026-10-13 incident](docs/hltv-403-incident.md).
-- Malformed timestamps, missing sections, other HTTP errors and conflicting data
-  fail the run (exit 1); they are not successful empty schedules. Real failures
+- Malformed timestamps, missing sections and other HTTP errors fail the run
+  (exit 1); they are not successful empty schedules. When two team pages disagree
+  about a fixture's start time, the source snapshot is inconsistent: the run is
+  skipped with the Calendar untouched (exit 0, no block-streak change), so a later
+  run can read a consistent snapshot. Real failures
   are sent to **Filipe Nevola Factory** (the Warren work controller, `POST /work`),
   which investigates and opens a fix PR or asks on GitHub. Repeats of the same
   failure join the open work item. The Slack error says what failed and the work ID.

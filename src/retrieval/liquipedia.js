@@ -26,6 +26,13 @@ export class SourceBlockedError extends Error {
   }
 }
 
+// AbortSignal.timeout aborts a hanging request with a DOMException named TimeoutError.
+// A source that never answers (or holds the connection on an anti-bot challenge) is
+// refusing to serve, not returning data, so it is a block rather than a failed run.
+export function isTimeoutError(error) {
+  return error?.name === 'TimeoutError' || error?.cause?.name === 'TimeoutError' || error?.code === 'ETIMEDOUT';
+}
+
 export function parseTimestamp(value) {
   // Liquipedia data-timestamp is UTC seconds, NOT the displayed CEST text.
   if (!/^\d{10}$/.test(value || '') || +value < 946684800 || +value > 4102444800) {
@@ -111,6 +118,9 @@ export async function fetchPage(team, { fetchImpl = fetch, sleep = ms => new Pro
       }
       return payload;
     } catch (error) {
+      // A hanging request is source unavailability; hand it to fetchMatches' patient
+      // block retry instead of hammering it here or failing the whole run.
+      if (isTimeoutError(error)) throw new SourceBlockedError(`Liquipedia request timed out: ${team.page}`);
       // Never hammer a rate limit. Retry only transient failures.
       if (error.blocked || error.noRetry || attempt === 2) throw error;
       await sleep(PARSE_INTERVAL_MS);

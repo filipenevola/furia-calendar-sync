@@ -31,10 +31,13 @@ and has 60/15 minute popup reminders.
 ## Safety and identity
 
 - All team pages must load and validate before any calendar write.
-- A rate-limited or blocked page (HTTP 403/429 or API `ratelimited`) is retried
+- A rate-limited or blocked page (HTTP 403/429, API `ratelimited`, or a request
+  that never answers within 30 seconds) is retried
   once after 60 seconds. If it is blocked again, the
   run is **skipped**: Calendar is not read or written, a `"status":"skipped"`
   line with the reason is logged, and the job exits 0 without a Slack alert.
+  A hanging connection is anti-bot/rate-limit behavior, not data, so it never
+  fails the run or reaches Factory.
   A block is never treated as an empty schedule. Consecutive blocked runs are
   counted; Slack gets one warning on every 10th (`BLOCK_NOTIFY_EVERY`) and a
   successful sync resets the count. The counter is a private event in the service

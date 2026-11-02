@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
 import { readFile } from 'node:fs/promises';
-import { TEAMS, BLOCK_RETRY_DELAY_MS, PARSE_INTERVAL_MS, USER_AGENT, parseTeamPage, parseTimestamp, fixtureKey, fetchPage, fetchMatches, resolveFromTournament } from '../src/retrieval/liquipedia.js';
+import { TEAMS, BLOCK_RETRY_DELAY_MS, PARSE_INTERVAL_MS, USER_AGENT, parseTeamPage, parseTimestamp, fixtureKey, fetchPage, fetchMatches, resolveFromTournament, SourceBlockedError } from '../src/retrieval/liquipedia.js';
 import { processMatches, getMatchUniqueKey } from '../src/processing.js';
 import { matchToCalendarEvent, parseCredentials, planCalendarSync, getExistingEvents, syncMatchesToCalendar, summaryTeams } from '../src/calendar.js';
 import { decodeCalendarId } from '../src/config.js';
@@ -139,6 +139,26 @@ test('a persistent block skips the run without touching the Calendar', async () 
   expect(result).toMatchObject({ status: 'skipped', calendar: 'untouched' });
   expect(result.reason).toContain('429');
   expect(fetches).toBe(3);
+  expect(writes).toBe(0);
+});
+test('a hanging source request is a block, so the run skips instead of failing', async () => {
+  const timeout = () => new DOMException('The operation timed out.', 'TimeoutError');
+  // fetchPage does not hammer a hanging source and raises a block instead of a raw timeout.
+  let attempts = 0;
+  const error = await fetchPage(TEAMS[0], { sleep: noSleep, fetchImpl: async () => { attempts++; throw timeout(); } }).catch(e => e);
+  expect(error).toBeInstanceOf(SourceBlockedError);
+  expect(error.blocked).toBe(true);
+  expect(error.message).toContain('timed out');
+  expect(attempts).toBe(1);
+
+  // A timeout repeated on the patient retry skips the run and leaves the Calendar untouched.
+  let writes = 0; let fetches = 0;
+  const result = await sync({ retrieve: () => fetchMatches({ now, sleep: noSleep, fetchTeam: team => fetchPage(team, {
+    sleep: noSleep, fetchImpl: async () => { fetches++; throw timeout(); },
+  }) }), writeCalendar: async () => { writes++; } });
+  expect(result).toMatchObject({ status: 'skipped', calendar: 'untouched' });
+  expect(result.reason).toContain('timed out');
+  expect(fetches).toBe(2);
   expect(writes).toBe(0);
 });
 test('HTTP errors: identifying User-Agent, bounded transient retry, no retry of a rate limit', async () => {

@@ -37,7 +37,7 @@ and has 60/15 minute popup reminders.
   run is **skipped**: Calendar is not read or written, a `"status":"skipped"`
   line with the reason is logged, and the job exits 0 without a Slack alert.
   A hanging connection is anti-bot/rate-limit behavior, not data, so it never
-  fails the run or reaches Factory.
+  fails the run or reaches T3.
   A block is never treated as an empty schedule. Consecutive blocked runs are
   counted; Slack gets one warning on every 10th (`BLOCK_NOTIFY_EVERY`) and a
   successful sync resets the count. The counter is a private event in the service
@@ -49,9 +49,8 @@ and has 60/15 minute popup reminders.
   [the 2026-10-23 incident](docs/liquipedia-stale-team-page-incident.md).
 - Malformed timestamps, missing sections, other HTTP errors and conflicting data
   the tournament page does not settle fail the run (exit 1); they are not successful empty schedules. Real failures
-  are sent to **Filipe Nevola Factory** (the Warren work controller, `POST /work`),
-  which investigates and opens a fix PR or asks on GitHub. Repeats of the same
-  failure join the open work item. The Slack error says what failed and the work ID.
+  post a Slack error that mentions **t3fn** when `T3_SLACK_BOT_USER_ID` is set. t3fn
+  starts a T3 thread on this repository, investigates and opens a fix PR.
 - An explicit "No upcoming matches" section is a valid empty result.
 - Only future matches are synchronized; live and completed matches are omitted.
 - `lp_<key>` identifies an event across rescheduling. The key hashes the
@@ -90,9 +89,8 @@ Credentials are needed only for calendar access. `GOOGLE_CREDENTIALS` accepts a
 Google service-account JSON object or its base64 encoding. Share the existing
 calendar with that service account with edit access. `GOOGLE_CALENDAR_ID` accepts
 its raw ID or base64-encoded ID. Do not commit credentials. Optional
-`SLACK_ERROR_WEBHOOK` preserves failure notifications. `FACTORY_WORK_BEARER`
-(secret, the work controller's `WORK_BEARER`) enables Factory reports;
-`FACTORY_WORK_URL` overrides the controller URL. `DRY_RUN=true` is an
+`SLACK_ERROR_WEBHOOK` preserves failure notifications. `T3_SLACK_BOT_USER_ID` is
+the t3fn Slack bot user ID that those errors mention. `DRY_RUN=true` is an
 additional environment-level write guard; `--dry-run` always prevents writes.
 `VALIDATION_ROUNDS` and `VALIDATION_INTERVAL_MS` tune the read-only live script.
 

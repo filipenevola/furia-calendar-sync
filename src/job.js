@@ -2,7 +2,7 @@ import { sync } from './sync.js';
 import { logger } from './logger.js';
 import { getCalendarClient } from './calendar.js';
 import { recordBlockedRun, recordSuccessfulRun, NOTIFY_EVERY } from './block-streak.js';
-import { reportToFactory } from './factory.js';
+import { t3Request } from './t3.js';
 
 const args = process.argv.slice(2);
 if (args.some(arg => !['--dry-run', '--check-calendar'].includes(arg))) throw new Error('Unknown job option');
@@ -37,12 +37,7 @@ try {
   // Do not serialize API request configs, credentials or response bodies.
   const message = `Calendar job failed: ${error.message}`;
   console.error(JSON.stringify({ status: 'error', dryRun, message }));
-  // Real failures go to Filipe Nevola Factory, which investigates and opens a fix PR or asks on GitHub.
-  const factory = dryRun ? { reported: false, reason: 'dry run' } : await reportToFactory(error);
-  console.error(JSON.stringify({ status: 'factory', ...factory }));
-  const handoff = factory.reported
-    ? `Sent to Filipe Nevola Factory (${factory.workId}${factory.duplicate ? ', already open' : ''}).`
-    : `Not sent to Filipe Nevola Factory: ${factory.reason}.`;
-  await logger.error(`${message}\n\n${handoff}`, new Error(message));
+  // Real failures mention t3fn in Slack, which investigates and opens a fix PR. A dry run only logs.
+  await logger.error(dryRun ? message : t3Request(message), new Error(message));
   process.exitCode = 1;
 }
